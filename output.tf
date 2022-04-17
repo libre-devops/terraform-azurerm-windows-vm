@@ -9,7 +9,7 @@ output "vm_name" {
 
 output "vm_zones" {
   description = "map with key `Virtual Machine Id`, value `list of the Availability Zone` which the Virtual Machine should be allocated in."
-  value       = zipmap(azurerm_windows_virtual_machine.windows_vm.*.id, azurerm_windows_virtual_machine.windows_vm.*.zones)
+  value       = zipmap(azurerm_windows_virtual_machine.windows_vm.*.id, azurerm_windows_virtual_machine.windows_vm.*.zone)
 }
 
 output "vm_identity" {
