@@ -3,9 +3,7 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
   name                          = var.vm_hostname
   resource_group_name           = var.rg_name
   location                      = var.location
-  vm_size                       = var.vm_size
   network_interface_ids         = var.nic_ids
-  delete_os_disk_on_termination = var.delete_os_disk_on_termination
   license_type                  = var.license_type
   patch_mode                    = var.patch_mode
   enable_automatic_updates      = var.enable_automatic_updates
@@ -13,13 +11,12 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
   admin_username                = var.admin_username
   admin_password                = var.admin_password
   size                          = var.vm_size
-  zones                         = var.availability_zone == "1" || "2" || "3" || "alternate" ? (count.index % 2) + 1 : null
+  zone                         = var.availability_zone == "1" || "2" || "3" || "alternate" ? (count.index % 2) + 1 : null
 
   provision_vm_agent = true
   timezone           = var.timezone
 
   source_image_reference {
-    id        = var.vm_os_id
     publisher = var.vm_os_id == "" ? coalesce(var.vm_os_publisher, module.os_calculator.calculated_value_os_publisher) : ""
     offer     = var.vm_os_id == "" ? coalesce(var.vm_os_offer, module.os_calculator.calculated_value_os_offer) : ""
     sku       = var.vm_os_id == "" ? coalesce(var.vm_os_sku, module.os_calculator.calculated_value_os_sku) : ""
