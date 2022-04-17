@@ -1,6 +1,6 @@
 resource "azurerm_windows_virtual_machine" "windows_vm" {
   count                         = var.vm_amount
-  name                          = var.vm_hostname
+  name                          = "${var.vm_hostname}${format("%02d", count.index + 1)}"
   resource_group_name           = var.rg_name
   location                      = var.location
   network_interface_ids         = var.nic_ids
@@ -39,7 +39,7 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
   }
 
   os_disk {
-    name                 = "${var.vm_hostname}-osdisk"
+    name                 = "${var.vm_hostname}${format("%02d", count.index + 1)}-osdisk"
     caching              = "ReadWrite"
     storage_account_type = var.storage_account_type
     disk_size_gb         = var.vm_os_disk_size_gb
