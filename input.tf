@@ -27,6 +27,11 @@ variable "nic_ids" {
   type        = any
 }
 
+variable "subnet_id" {
+  type        = string
+  description = "The subnet ID for the NICs which are created with the VMs to be added to"
+}
+
 variable "patch_mode" {
   default     = "Manual"
   description = "The patching mode of the virtual machines being deployed, default is Manual"
