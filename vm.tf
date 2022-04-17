@@ -1,14 +1,14 @@
 resource "azurerm_network_interface" "nic" {
   count = var.vm_amount
 
-  name                = "${var.vm_hostname}${format("%02d", count.index + 1)}-nic"
+  name                = "nic-${var.vm_hostname}${format("%02d", count.index + 1)}"
   resource_group_name = var.rg_name
   location            = var.location
 
   enable_accelerated_networking = var.enable_accelerated_networking
 
   ip_configuration {
-    name                          = "${var.vm_hostname}${format("%02d", count.index + 1)}-nic-ipconfig"
+    name                          = "nic-ipconfig-${var.vm_hostname}${format("%02d", count.index + 1)}"
     primary                       = true
     private_ip_address_allocation = "Dynamic"
     subnet_id                     = var.subnet_id
@@ -61,7 +61,7 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
   }
 
   os_disk {
-    name                 = "${var.vm_hostname}${format("%02d", count.index + 1)}-osdisk"
+    name                 = "osdisk-${var.vm_hostname}${format("%02d", count.index + 1)}"
     caching              = "ReadWrite"
     storage_account_type = var.storage_account_type
     disk_size_gb         = var.vm_os_disk_size_gb
