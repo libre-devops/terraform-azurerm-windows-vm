@@ -1,17 +1,17 @@
 resource "azurerm_windows_virtual_machine" "windows_vm" {
-  count                         = var.vm_amount
-  name                          = "${var.vm_hostname}${format("%02d", count.index + 1)}"
-  resource_group_name           = var.rg_name
-  location                      = var.location
-  network_interface_ids         = var.nic_ids
-  license_type                  = var.license_type
-  patch_mode                    = var.patch_mode
-  enable_automatic_updates      = var.enable_automatic_updates
-  computer_name                 = var.vm_hostname
-  admin_username                = var.admin_username
-  admin_password                = var.admin_password
-  size                          = var.vm_size
-  zone                          = var.availability_zone == "alternate" ? (count.index % 2) + 1 : null
+  count                    = var.vm_amount
+  name                     = "${var.vm_hostname}${format("%02d", count.index + 1)}"
+  resource_group_name      = var.rg_name
+  location                 = var.location
+  network_interface_ids    = var.nic_ids
+  license_type             = var.license_type
+  patch_mode               = var.patch_mode
+  enable_automatic_updates = var.enable_automatic_updates
+  computer_name            = var.vm_hostname
+  admin_username           = var.admin_username
+  admin_password           = var.admin_password
+  size                     = var.vm_size
+  zone                     = var.availability_zone == "alternate" ? (count.index % 2) + 1 : null
 
   provision_vm_agent = true
   timezone           = var.timezone
