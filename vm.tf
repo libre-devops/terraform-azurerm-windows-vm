@@ -11,7 +11,7 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
   admin_username                = var.admin_username
   admin_password                = var.admin_password
   size                          = var.vm_size
-  zone                         = var.availability_zone == "1" || "2" || "3" || "alternate" ? (count.index % 2) + 1 : null
+  zone                         = var.availability_zone == "alternate" ? (count.index % 2) + 1 : 1 || 2 || 3
 
   provision_vm_agent = true
   timezone           = var.timezone
