@@ -25,7 +25,7 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
   name                     = "${var.vm_hostname}${format("%02d", count.index + 1)}"
   resource_group_name      = var.rg_name
   location                 = var.location
-  network_interface_ids    = var.nic_ids
+  network_interface_ids    = [azurerm_network_interface.nic[count.index].id]
   license_type             = var.license_type
   patch_mode               = var.patch_mode
   enable_automatic_updates = var.enable_automatic_updates

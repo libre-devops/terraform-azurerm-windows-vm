@@ -22,11 +22,6 @@ variable "vm_hostname" {
   type        = string
 }
 
-variable "nic_ids" {
-  description = "The IDs of the network interfaces to be added to the VM(s)"
-  type        = any
-}
-
 variable "subnet_id" {
   type        = string
   description = "The subnet ID for the NICs which are created with the VMs to be added to"
