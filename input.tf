@@ -24,7 +24,7 @@ variable "vm_hostname" {
 
 variable "nic_ids" {
   description = "The IDs of the network interfaces to be added to the VM(s)"
-  type        = list(string)
+  type        = any
 }
 
 variable "patch_mode" {
