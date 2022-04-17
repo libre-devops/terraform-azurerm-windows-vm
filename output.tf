@@ -4,7 +4,7 @@ output "vm_ids" {
 }
 
 output "vm_name" {
-  value = azurerm_windows_virtual_machine.windows_vm.name
+  value = azurerm_windows_virtual_machine.windows_vm.*.name
 }
 
 output "vm_zones" {
