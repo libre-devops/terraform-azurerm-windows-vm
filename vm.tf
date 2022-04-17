@@ -21,9 +21,12 @@ resource "azurerm_network_interface" "nic" {
   }
 }
 
-#checkov:skip=CKV_AZURE_50:Ensure Virtual Machine extensions are not installed - You may want to test extensions, so disabled.
-#checkov:skip=CKV_AZURE_151:Ensure Windows VM enables encryption - Disabled as this is not needed for this KISS module
+
 resource "azurerm_windows_virtual_machine" "windows_vm" {
+
+  #checkov:skip=CKV_AZURE_50:Ensure Virtual Machine extensions are not installed - You may want to test extensions, so disabled.
+  #checkov:skip=CKV_AZURE_151:Ensure Windows VM enables encryption - Disabled as this is not needed for this KISS module
+
   count                    = var.vm_amount
   name                     = "${var.vm_hostname}${format("%02d", count.index + 1)}"
   resource_group_name      = var.rg_name
