@@ -16,3 +16,8 @@ output "vm_identity" {
   description = "map with key `Virtual Machine Id`, value `list of identity` created for the Virtual Machine."
   value       = zipmap(azurerm_virtual_machine.windows_vm.*.id, azurerm_virtual_machine.windows_vm.*.identity)
 }
+
+output "vm_amount" {
+  description = "The amount of VMs passed to the vm_amount variable"
+  value       = var.vm_amount
+}

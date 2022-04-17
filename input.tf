@@ -22,16 +22,35 @@ variable "vm_hostname" {
   type        = string
 }
 
-variable "subnet_id" {
-  description = "The ID of the subnet which the network interface is to be added to"
-  type        = string
-}
-
 variable "nic_ids" {
   description = "The IDs of the network interfaces to be added to the VM(s)"
   type        = list(string)
 }
 
+variable "patch_mode" {
+  default     = "Manual"
+  description = "The patching mode of the virtual machines being deployed, default is Manual"
+}
+
+variable "enable_automatic_updates" {
+  default     = false
+  description = "Should automatic updates be enabled? Defaults to false"
+}
+
+variable "timezone" {
+  default     = "GMT Standard Time"
+  description = "The timezone for your VM to be deployed with"
+}
+
+variable "availability_zone" {
+  default     = null
+  description = "The availability zone for the VMs to be created to"
+}
+
+variable "vm_os_disk_size_gb" {
+  default     = "127"
+  description = "The size of the OS Disk in GiB"
+}
 
 variable "public_ip_dns" {
   description = "Optional globally unique per datacenter region domain name label to apply to each public ip address. e.g. thisvar.varlocation.cloudapp.azure.com where you specify only thisvar here. This is an array of names which will pair up sequentially to the number of public ips defined in var.nb_public_ip. One name or empty string is required for every public ip. If no public ip is desired, then set this to an array with a single empty string."
@@ -66,7 +85,7 @@ variable "custom_data" {
 variable "storage_account_type" {
   description = "Defines the type of storage account to be created. Valid options are Standard_LRS, Standard_ZRS, Standard_GRS, Standard_RAGRS, Premium_LRS."
   type        = string
-  default     = "Premium_LRS"
+  default     = "Standard_LRS"
 }
 
 variable "vm_size" {
@@ -76,9 +95,15 @@ variable "vm_size" {
 }
 
 variable "vm_os_simple" {
-  description = "Specify UbuntuServer, WindowsServer, RHEL, openSUSE-Leap, CentOS, Debian, CoreOS and SLES to get the latest image version of the specified os.  Do not provide this value if a custom value is used for vm_os_publisher, vm_os_offer, and vm_os_sku."
+  description = "Specify WindowsServer, to get the latest image version of the specified os.  Do not provide this value if a custom value is used for vm_os_publisher, vm_os_offer, and vm_os_sku."
   type        = string
   default     = ""
+}
+
+variable "is_custom_image" {
+  description = "Boolean flag to notify when the custom image is used."
+  type        = bool
+  default     = false
 }
 
 variable "vm_os_id" {
