@@ -1,32 +1,3 @@
-## Info
-
-This module follows the KISS design pattern compared to other modules in the market.  It does not try to do anything crazy and consider availability sets, scale sets etc, this will create you a VM based on some parameters you give it, nothing more, nothing less
-
-
-```hcl
-module "win_vm" {
-  source = "github.com/libre-devops/terraform-azurerm-windows-vm"
-
-  rg_name  = module.rg.rg_name
-  location = module.rg.rg_location
-
-  vm_amount          = local.vm_amount
-  vm_hostname        = "vm${var.short}${var.loc}${terraform.workspace}"
-  vm_size            = "Standard_B2ms"
-  vm_os_simple       = "WindowsServer2019"
-  vm_os_disk_size_gb = "127"
-
-  admin_username = "LibreDevOpsAdmin"
-  admin_password = data.azurerm_key_vault_secret.mgmt_local_admin_pwd.value
-
-  subnet_id            = element(values(module.network.subnets_ids), 0)
-  availability_zone    = "alternate"
-  storage_account_type = "Standard_LRS"
-  identity_type        = "SystemAssigned"
-
-  tags = module.rg.rg_tags
-}
-```
 ## Requirements
 
 No requirements.
