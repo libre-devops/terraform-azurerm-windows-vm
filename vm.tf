@@ -24,7 +24,6 @@ resource "azurerm_network_interface" "nic" {
 
 resource "azurerm_windows_virtual_machine" "windows_vm" {
 
-
   count                    = var.vm_amount
   name                     = "${var.vm_hostname}${format("%02d", count.index + 1)}"
   resource_group_name      = var.rg_name
@@ -39,14 +38,12 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
   size                     = var.vm_size
   zone                     = var.availability_zone == "alternate" ? (count.index % 2) + 1 : null
 
-  provision_vm_agent = true
-  timezone           = var.timezone
-
-  #checkov:skip=CKV_AZURE_50:Ensure Virtual Machine extensions are not installed - You may want to test extensions, so disabled.
-  allow_extension_operations = true
-
-  #checkov:skip=CKV_AZURE_151:Ensure Windows VM enables encryption - Disabled as this is not needed for this KISS module
   encryption_at_host_enabled = true
+  provision_vm_agent         = true
+  timezone                   = var.timezone
+
+  #checkov:skip=CKV_AZURE_50:Ensure Virtual Machine extensions are not installed
+  allow_extension_operations = true
 
   source_image_reference {
     publisher = var.vm_os_id == "" ? coalesce(var.vm_os_publisher, module.os_calculator.calculated_value_os_publisher) : ""
