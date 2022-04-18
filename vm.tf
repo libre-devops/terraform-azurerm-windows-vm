@@ -21,7 +21,6 @@ resource "azurerm_network_interface" "nic" {
   }
 }
 
-
 resource "azurerm_windows_virtual_machine" "windows_vm" {
 
   count                    = var.vm_amount

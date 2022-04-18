@@ -21,3 +21,15 @@ output "vm_amount" {
   description = "The amount of VMs passed to the vm_amount variable"
   value       = var.vm_amount
 }
+
+output "nic_id" {
+  value = azurerm_network_interface.nic.*.id
+}
+
+output "nic_ip_config_name" {
+  value = azurerm_network_interface.nic.*.ip_configuration
+}
+
+output "nic_ip_private_ip" {
+  value = azurerm_network_interface.nic.*.private_ip_address
+}
