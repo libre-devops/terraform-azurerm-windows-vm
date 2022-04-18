@@ -22,40 +22,86 @@ variable "vm_hostname" {
   type        = string
 }
 
-variable "subnet_id" {
-  type        = string
-  description = "The subnet ID for the NICs which are created with the VMs to be added to"
-}
-
 variable "patch_mode" {
   default     = "Manual"
   description = "The patching mode of the virtual machines being deployed, default is Manual"
+  type        = string
 }
 
 variable "enable_automatic_updates" {
   default     = false
   description = "Should automatic updates be enabled? Defaults to false"
+  type        = string
+}
+
+variable "static_private_ip" {
+  default     = null
+  description = "If you are using a static IP, set it in this variable"
+  type        = string
+}
+
+variable "public_ip_sku" {
+  default     = null
+  description = "If you wish to assign a public IP directly to your nic, set this to Standard"
+  type        = string
+}
+
+variable "pip_name" {
+  default     = null
+  description = "If you are using a Public IP, set the name in this variable"
+  type        = string
+}
+
+variable "pip_custom_dns_label" {
+  default     = null
+  description = "If you are using a public IP and wish to assign a custom DNS label, set here, otherwise, the VM host name will be used"
+}
+
+variable "subnet_id" {
+  type        = string
+  description = "The subnet ID for the NICs which are created with the VMs to be added to"
+}
+
+variable "vm_plan" {
+  description = "Used for VMs which requires a plan"
+  type        = set(string)
+  default     = null
+}
+
+variable "spot_instance_max_bid_price" {
+  default     = null
+  description = "The max bid price for a spot instance"
+  type        = string
+}
+
+variable "spot_instance_eviction_policy" {
+  default     = null
+  description = "The eviction policy for a spot instance"
+  type        = string
+}
+
+variable "spot_instance" {
+  description = "Whether the VM is a spot instance or not"
+  type        = bool
+  default     = false
 }
 
 variable "timezone" {
   default     = "GMT Standard Time"
   description = "The timezone for your VM to be deployed with"
+  type        = string
 }
 
 variable "availability_zone" {
   default     = null
   description = "The availability zone for the VMs to be created to"
+  type        = string
 }
 
 variable "vm_os_disk_size_gb" {
   default     = "127"
   description = "The size of the OS Disk in GiB"
-}
-
-variable "public_ip_dns" {
-  description = "Optional globally unique per datacenter region domain name label to apply to each public ip address. e.g. thisvar.varlocation.cloudapp.azure.com where you specify only thisvar here. This is an array of names which will pair up sequentially to the number of public ips defined in var.nb_public_ip. One name or empty string is required for every public ip. If no public ip is desired, then set this to an array with a single empty string."
-  type        = list(string)
-  default     = [null]
+  type        = string
 }
 
 variable "admin_password" {
@@ -64,22 +110,10 @@ variable "admin_password" {
   default     = ""
 }
 
-variable "remote_port" {
-  description = "Remote tcp port to be used for access to the vms created via the nsg applied to the nics."
-  type        = string
-  default     = ""
-}
-
 variable "admin_username" {
   description = "The admin username of the VM that will be deployed."
   type        = string
-  default     = "azureuser"
-}
-
-variable "custom_data" {
-  description = "The custom data to supply to the machine. This can be used as a cloud-init for Linux systems."
-  type        = string
-  default     = ""
+  default     = "LibreDevOpsAdmin"
 }
 
 variable "storage_account_type" {
@@ -91,7 +125,7 @@ variable "storage_account_type" {
 variable "vm_size" {
   description = "Specifies the size of the virtual machine."
   type        = string
-  default     = "Standard_D2s_v3"
+  default     = "Standard_B2ms"
 }
 
 variable "vm_os_simple" {
@@ -104,6 +138,17 @@ variable "is_custom_image" {
   description = "Boolean flag to notify when the custom image is used."
   type        = bool
   default     = false
+}
+
+variable "asg_name" {
+  description = "The name of the application security group to be made"
+  type        = string
+}
+
+variable "license_type" {
+  description = "Specifies the BYOL Type for this Virtual Machine. This is only applicable to Windows Virtual Machines. Possible values are Windows_Client and Windows_Server"
+  type        = string
+  default     = null
 }
 
 variable "vm_os_id" {
@@ -151,34 +196,10 @@ variable "allocation_method" {
   default     = "Dynamic"
 }
 
-variable "delete_os_disk_on_termination" {
-  type        = bool
-  description = "Delete datadisk when machine is terminated."
-  default     = false
-}
-
-variable "delete_data_disks_on_termination" {
-  type        = bool
-  description = "Delete data disks when machine is terminated."
-  default     = false
-}
-
 variable "data_disk_size_gb" {
   description = "Storage data disk size size."
   type        = number
   default     = 30
-}
-
-variable "boot_diagnostics" {
-  type        = bool
-  description = "(Optional) Enable or Disable boot diagnostics."
-  default     = false
-}
-
-variable "boot_diagnostics_sa_type" {
-  description = "(Optional) Storage account type for boot diagnostics."
-  type        = string
-  default     = "Standard_LRS"
 }
 
 variable "enable_accelerated_networking" {
@@ -186,13 +207,6 @@ variable "enable_accelerated_networking" {
   description = "(Optional) Enable accelerated networking on Network interface."
   default     = false
 }
-
-variable "license_type" {
-  description = "Specifies the BYOL Type for this Virtual Machine. This is only applicable to Windows Virtual Machines. Possible values are Windows_Client and Windows_Server"
-  type        = string
-  default     = null
-}
-
 variable "identity_type" {
   description = "The Managed Service Identity Type of this Virtual Machine."
   type        = string
@@ -202,20 +216,5 @@ variable "identity_type" {
 variable "identity_ids" {
   description = "Specifies a list of user managed identity ids to be assigned to the VM."
   type        = list(string)
-  default     = []
-}
-
-variable "extra_disks" {
-  description = "(Optional) List of extra data disks attached to each virtual machine."
-  type = list(object({
-    name = string
-    size = number
-  }))
-  default = []
-}
-
-variable "os_profile_secrets" {
-  description = "Specifies a list of certificates to be installed on the VM, each list item is a map with the keys source_vault_id, certificate_url and certificate_store."
-  type        = list(map(string))
   default     = []
 }

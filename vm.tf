@@ -1,26 +1,3 @@
-resource "azurerm_network_interface" "nic" {
-  count = var.vm_amount
-
-  name                = "nic-${var.vm_hostname}${format("%02d", count.index + 1)}"
-  resource_group_name = var.rg_name
-  location            = var.location
-
-  enable_accelerated_networking = var.enable_accelerated_networking
-
-  ip_configuration {
-    name                          = "nic-ipconfig-${var.vm_hostname}${format("%02d", count.index + 1)}"
-    primary                       = true
-    private_ip_address_allocation = "Dynamic"
-    subnet_id                     = var.subnet_id
-  }
-  tags = var.tags
-
-  timeouts {
-    create = "5m"
-    delete = "10m"
-  }
-}
-
 resource "azurerm_windows_virtual_machine" "windows_vm" {
 
   count                    = var.vm_amount
@@ -37,8 +14,8 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
   size                     = var.vm_size
   zone                     = var.availability_zone == "alternate" ? (count.index % 3) + 1 : null // Alternates zones for VMs in count, 1, 2 then 3. Use availability set if you want HA.
 
-  provision_vm_agent         = true
-  timezone                   = var.timezone
+  provision_vm_agent = true
+  timezone           = var.timezone
 
   #checkov:skip=CKV_AZURE_151:Ensure Virtual Machine extensions are not installed
   encryption_at_host_enabled = false
@@ -60,6 +37,15 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
     }
   }
 
+  dynamic "plan" {
+    for_each = toset(var.vm_plan != null ? ["fake"] : [])
+    content {
+      name      = lookup(var.vm_plan, "name", null)
+      product   = lookup(var.vm_plan, "product", null)
+      publisher = lookup(var.vm_plan, "publisher", null)
+    }
+  }
+
   dynamic "identity" {
     for_each = length(var.identity_ids) > 0 || var.identity_type == "UserAssigned" ? [var.identity_type] : []
     content {
@@ -67,6 +53,10 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
       identity_ids = length(var.identity_ids) > 0 ? var.identity_ids : []
     }
   }
+
+  priority        = var.spot_instance ? "Spot" : "Regular"
+  max_bid_price   = var.spot_instance ? var.spot_instance_max_bid_price : null
+  eviction_policy = var.spot_instance ? var.spot_instance_eviction_policy : null
 
   os_disk {
     name                 = "osdisk-${var.vm_hostname}${format("%02d", count.index + 1)}"
