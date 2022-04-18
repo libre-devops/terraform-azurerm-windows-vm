@@ -20,7 +20,7 @@ module "win_vm" {
   admin_password = data.azurerm_key_vault_secret.mgmt_local_admin_pwd.value
 
   subnet_id            = element(values(module.network.subnets_ids), 0)
-  availability_zone    = "alternate"
+  availability_zone    = "alternate" // When more than 1 VMs is made, it puts them in different availability zones
   storage_account_type = "Standard_LRS"
   identity_type        = "SystemAssigned"
 
