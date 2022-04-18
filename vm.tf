@@ -38,9 +38,11 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
   size                     = var.vm_size
   zone                     = var.availability_zone == "alternate" ? (count.index % 3) + 1 : null // Alternates zones for VMs in count, 1, 2 then 3. Use availability set if you want HA.
 
-  encryption_at_host_enabled = true
   provision_vm_agent         = true
   timezone                   = var.timezone
+
+  #checkov:skip=CKV_AZURE_151:Ensure Virtual Machine extensions are not installed
+  encryption_at_host_enabled = false
 
   #checkov:skip=CKV_AZURE_50:Ensure Virtual Machine extensions are not installed
   allow_extension_operations = true
