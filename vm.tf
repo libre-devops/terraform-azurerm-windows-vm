@@ -75,6 +75,10 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
     disk_size_gb         = var.vm_os_disk_size_gb
   }
 
+  boot_diagnostics {
+    storage_account_uri = null // Use managed storage account
+  }
+
   tags = var.tags
 }
 
