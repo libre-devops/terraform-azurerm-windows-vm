@@ -36,7 +36,7 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
   admin_username           = var.admin_username
   admin_password           = var.admin_password
   size                     = var.vm_size
-  zone                     = var.availability_zone == "alternate" ? (count.index % 1) + 1 : null // Alternates zones for VMs in count, 1, 2 then 3. Use availability set if you want HA.
+  zone                     = var.availability_zone == "alternate" ? (count.index % 3) - 1 : null // Alternates zones for VMs in count, 1, 2 then 3. Use availability set if you want HA.
 
   encryption_at_host_enabled = true
   provision_vm_agent         = true
