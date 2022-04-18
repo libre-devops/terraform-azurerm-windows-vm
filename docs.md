@@ -1,32 +1,3 @@
-## Info
-
-This module follows the KISS design pattern compared to other modules in the market.  It does not try to do anything crazy and consider availability sets, scale sets etc, this will create you a VM based on some parameters you give it, nothing more, nothing less
-
-
-```hcl
-module "win_vm" {
-  source = "github.com/libre-devops/terraform-azurerm-windows-vm"
-
-  rg_name  = module.rg.rg_name
-  location = module.rg.rg_location
-
-  vm_amount          = local.vm_amount
-  vm_hostname        = "vm${var.short}${var.loc}${terraform.workspace}"
-  vm_size            = "Standard_B2ms"
-  vm_os_simple       = "WindowsServer2019"
-  vm_os_disk_size_gb = "127"
-
-  admin_username = "LibreDevOpsAdmin"
-  admin_password = data.azurerm_key_vault_secret.mgmt_local_admin_pwd.value
-
-  subnet_id            = element(values(module.network.subnets_ids), 0)
-  availability_zone    = "alternate"
-  storage_account_type = "Standard_LRS"
-  identity_type        = "SystemAssigned"
-
-  tags = module.rg.rg_tags
-}
-```
 ## Requirements
 
 No requirements.
@@ -101,3 +72,6 @@ No requirements.
 | <a name="output_nic_ip_private_ip"></a> [nic\_ip\_private\_ip](#output\_nic\_ip\_private\_ip) | The private IP assigned to the NIC |
 | <a name="output_vm_amount"></a> [vm\_amount](#output\_vm\_amount) | The amount of VMs passed to the vm\_amount variable |
 | <a name="output_vm_identity"></a> [vm\_identity](#output\_vm\_identity) | map with key `Virtual Machine Id`, value `list of identity` created for the Virtual Machine. |
+| <a name="output_vm_ids"></a> [vm\_ids](#output\_vm\_ids) | Virtual machine ids created. |
+| <a name="output_vm_name"></a> [vm\_name](#output\_vm\_name) | n/a |
+| <a name="output_vm_zones"></a> [vm\_zones](#output\_vm\_zones) | map with key `Virtual Machine Id`, value `list of the Availability Zone` which the Virtual Machine should be allocated in. |
