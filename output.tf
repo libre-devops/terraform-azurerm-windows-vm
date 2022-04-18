@@ -23,13 +23,16 @@ output "vm_amount" {
 }
 
 output "nic_id" {
+  description = "The ID of the nics"
   value = azurerm_network_interface.nic.*.id
 }
 
 output "nic_ip_config_name" {
+  description = "The name of the IP Configurations"
   value = azurerm_network_interface.nic.*.ip_configuration
 }
 
 output "nic_ip_private_ip" {
+  description = "The private IP assigned to the NIC"
   value = azurerm_network_interface.nic.*.private_ip_address
 }
