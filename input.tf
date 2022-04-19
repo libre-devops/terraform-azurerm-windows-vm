@@ -163,6 +163,24 @@ variable "vm_os_publisher" {
   default     = ""
 }
 
+variable "provision_vm_agent" {
+  description = "Whether the Azure agent is installed on this VM, default is true"
+  type        = bool
+  default     = true
+}
+
+variable "enable_encryption_at_host" {
+  description = "Whether host encryption is enabled"
+  type        = bool
+  default     = false
+}
+
+variable "allow_extension_operations" {
+  description = "Whether extensions are allowed to execute on the VM"
+  type        = bool
+  default     = true
+}
+
 variable "vm_os_offer" {
   description = "The name of the offer of the image that you want to deploy. This is ignored when vm_os_id or vm_os_simple are provided."
   type        = string

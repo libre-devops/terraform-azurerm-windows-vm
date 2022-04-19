@@ -13,15 +13,14 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
   admin_password           = var.admin_password
   size                     = var.vm_size
   zone                     = var.availability_zone == "alternate" ? (count.index % 3) + 1 : null // Alternates zones for VMs in count, 1, 2 then 3. Use availability set if you want HA.
+  timezone                 = var.timezone
 
-  provision_vm_agent = true
-  timezone           = var.timezone
-
-  #checkov:skip=CKV_AZURE_151:Ensure Virtual Machine extensions are not installed
-  encryption_at_host_enabled = false
+  #checkov:skip=CKV_AZURE_151:Ensure Encryption at host is enabled
+  encryption_at_host_enabled = var.enable_encryption_at_host
 
   #checkov:skip=CKV_AZURE_50:Ensure Virtual Machine extensions are not installed
-  allow_extension_operations = true
+  allow_extension_operations = var.allow_extension_operations
+  provision_vm_agent         = var.provision_vm_agent
 
   source_image_reference {
     publisher = var.vm_os_id == "" ? coalesce(var.vm_os_publisher, module.os_calculator.calculated_value_os_publisher) : ""
