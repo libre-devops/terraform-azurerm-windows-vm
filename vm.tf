@@ -28,6 +28,7 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
   allow_extension_operations = var.allow_extension_operations
   provision_vm_agent         = var.provision_vm_agent
 
+  // Uses calculator
   dynamic "source_image_reference" {
     for_each = try(var.use_simple_image, null) == true && try(var.use_simple_image_with_plan, null) == false ? [1] : []
     content {
@@ -38,6 +39,7 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
     }
   }
 
+  // Uses your own
   dynamic "source_image_reference" {
     for_each = try(var.use_simple_image, null) == false && try(var.use_simple_image_with_plan, null) == false ? [1] : []
     content {
