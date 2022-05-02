@@ -39,9 +39,9 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
     }
   }
 
-  // Uses your own
+  // Uses your own source image
   dynamic "source_image_reference" {
-    for_each = try(var.use_simple_image, null) == false && try(var.use_simple_image_with_plan, null) == false ? [1] : []
+    for_each = try(var.use_simple_image, null) == false && try(var.use_simple_image_with_plan, null) == false && try(var.plan, {}) == {} ? [1] : []
     content {
       publisher = lookup(var.source_image_reference, "publisher", null)
       offer     = lookup(var.source_image_reference, "offer", null)
