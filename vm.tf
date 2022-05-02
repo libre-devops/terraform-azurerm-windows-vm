@@ -31,6 +31,16 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
       version   = var.vm_os_id == "" ? var.vm_os_version : ""
     }
   }
+
+  dynamic "plan" {
+    for_each = toset(var.vm_plan != null ? ["fake"] : [])
+    content {
+      name      = lookup(var.vm_plan, "name", null)
+      product   = lookup(var.vm_plan, "product", null)
+      publisher = lookup(var.vm_plan, "publisher", null)
+    }
+  }
+
   dynamic "source_image_reference" {
     for_each = lookup(var.use_custom_image, "source_image_reference", {}) != {} ? [1] : []
 
@@ -78,7 +88,7 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
 module "os_calculator" {
   source = "registry.terraform.io/libre-devops/win-os-sku-calculator/azurerm"
 
-  count = try(var.use_simple_image, null) == true ? [1] : []
+  count = try(var.use_simple_image, null) == true ? 1 : 0
 
   vm_os_simple = var.vm_os_simple
 }
