@@ -44,10 +44,10 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
   dynamic "source_image_reference" {
     for_each = try(var.use_simple_image, null) == false ? [1] : []
     content {
-      publisher = lookup(var.custom_image_settings.source_image_reference, "publisher", null)
-      offer     = lookup(var.custom_image_settings.source_image_reference, "offer", null)
-      sku       = lookup(var.custom_image_settings.source_image_reference, "sku", null)
-      version   = lookup(var.custom_image_settings.source_image_reference, "version", null)
+      publisher = lookup(var.source_image_reference, "publisher", null)
+      offer     = lookup(var.source_image_reference, "offer", null)
+      sku       = lookup(var.source_image_reference, "sku", null)
+      version   = lookup(var.source_image_reference, "version", null)
     }
   }
 

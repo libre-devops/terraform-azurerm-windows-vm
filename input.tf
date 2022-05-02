@@ -119,6 +119,12 @@ variable "rg_name" {
   }
 }
 
+variable "source_image_reference" {
+  default     = {}
+  description = "Whether the module should use the a custom image"
+  type        = map(any)
+}
+
 variable "spot_instance" {
   description = "Whether the VM is a spot instance or not"
   type        = bool
@@ -173,12 +179,6 @@ variable "use_simple_image" {
   default     = true
   description = "Whether the module should use the simple OS calculator module, default is true"
   type        = bool
-}
-
-variable "custom_image_settings" {
-  default     = {}
-  description = "Whether the module should use the a custom image"
-  type        = map(any)
 }
 
 variable "vm_amount" {
