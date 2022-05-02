@@ -152,7 +152,7 @@ resource "azurerm_marketplace_agreement" "plan_acceptance_simple" {
 resource "azurerm_marketplace_agreement" "plan_acceptance_custom" {
   count = try(var.use_simple_image, null) == false && try(var.use_simple_image_with_plan, null) == false ? 1 : 0
 
-  publisher = lookup(var.source_image_reference.plan, "publisher", null)
-  offer     = lookup(var.source_image_reference.plan, "product", null)
-  plan      = lookup(var.source_image_reference.plan, "name", null)
+  publisher = lookup(var.plan, "publisher", null)
+  offer     = lookup(var.plan, "product", null)
+  plan      = lookup(var.plan, "name", null)
 }
