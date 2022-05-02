@@ -42,6 +42,17 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
     }
   }
 
+  // To be used when a VM with a plan is used
+  dynamic "source_image_reference" {
+    for_each = try(var.use_simple_image, null) == true && try(var.use_simple_image_with_plan, null) == true ? [1] : []
+    content {
+      publisher = var.vm_os_id == "" ? coalesce(var.vm_os_publisher, module.os_calculator_with_plan[0].calculated_value_os_publisher) : ""
+      offer     = var.vm_os_id == "" ? coalesce(var.vm_os_offer, module.os_calculator_with_plan[0].calculated_value_os_offer) : ""
+      sku       = var.vm_os_id == "" ? coalesce(var.vm_os_sku, module.os_calculator_with_plan[0].calculated_value_os_sku) : ""
+      version   = var.vm_os_id == "" ? var.vm_os_version : ""
+    }
+  }
+
   dynamic "plan" {
     for_each = try(var.use_simple_image, null) == true && try(var.use_simple_image_with_plan, null) == true ? [1] : []
     content {
@@ -51,12 +62,23 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
     }
   }
 
-  dynamic "plan" {
-    for_each = try(var.use_simple_image, null) == false && try(var.use_simple_image_with_plan, null) == true ? [1] : []
+  // To be used when a custom image is wanted without the simple OS module, which has a plan attached
+  dynamic "source_image_reference" {
+    for_each = try(var.use_simple_image, null) == false && try(var.use_simple_image_with_plan, null) == false ? [1] : []
     content {
-      name      = toset(lookup(var.vm_plan, "name", null))
-      product   = toset(lookup(var.vm_plan, "product", null))
-      publisher = toset(lookup(var.source_image_reference, "publisher", null))
+      publisher = lookup(var.source_image_reference, "publisher", null)
+      offer     = lookup(var.source_image_reference, "offer", null)
+      sku       = lookup(var.source_image_reference, "sku", null)
+      version   = lookup(var.source_image_reference, "version", null)
+    }
+  }
+
+  dynamic "plan" {
+    for_each = try(var.use_simple_image, null) == false && try(var.use_simple_image_with_plan, null) == false ? [1] : []
+    content {
+      name      = toset(lookup(var.source_image_reference.plan, "name", null))
+      product   = toset(lookup(var.source_image_reference.plan, "product", null))
+      publisher = toset(lookup(var.source_image_reference.plan, "publisher", null))
     }
   }
 

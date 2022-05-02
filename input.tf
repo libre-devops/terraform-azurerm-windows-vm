@@ -239,12 +239,6 @@ variable "vm_os_version" {
   default     = "latest"
 }
 
-variable "vm_plan" {
-  description = "Used for VMs which requires a plan"
-  type        = map(any)
-  default     = {}
-}
-
 variable "vm_size" {
   description = "Specifies the size of the virtual machine."
   type        = string
