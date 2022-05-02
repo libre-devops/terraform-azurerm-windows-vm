@@ -14,7 +14,7 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
   license_type             = var.license_type
   patch_mode               = var.patch_mode
   enable_automatic_updates = var.enable_automatic_updates
-  computer_name            = var.vm_hostname
+  computer_name            = "${var.vm_hostname}${format("%02d", count.index + 1)}"
   admin_username           = var.admin_username
   admin_password           = var.admin_password
   size                     = var.vm_size
