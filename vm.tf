@@ -32,15 +32,6 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
     }
   }
 
-  dynamic "plan" {
-    for_each = toset(var.vm_plan != null ? ["fake"] : [])
-    content {
-      name      = lookup(var.vm_plan, "name", null)
-      product   = lookup(var.vm_plan, "product", null)
-      publisher = lookup(var.vm_plan, "publisher", null)
-    }
-  }
-
   dynamic "source_image_reference" {
     for_each = try(var.use_simple_image, null) == false ? [1] : []
     content {
@@ -48,6 +39,24 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
       offer     = lookup(var.source_image_reference, "offer", null)
       sku       = lookup(var.source_image_reference, "sku", null)
       version   = lookup(var.source_image_reference, "version", null)
+    }
+  }
+
+  dynamic "plan" {
+    for_each = try(var.use_simple_image_with_plan, null) == true ? [1] : []
+    content {
+      name      = var.vm_os_id == "" ? coalesce(var.vm_os_sku, module.os_calculator_with_plan[0].calculated_value_os_sku) : ""
+      product   = var.vm_os_id == "" ? coalesce(var.vm_os_offer, module.os_calculator_with_plan[0].calculated_value_os_offer) : ""
+      publisher = var.vm_os_id == "" ? coalesce(var.vm_os_publisher, module.os_calculator_with_plan[0].calculated_value_os_publisher) : ""
+    }
+  }
+
+  dynamic "plan" {
+    for_each = try(var.use_simple_image_with_plan, null) == false ? [1] : []
+    content {
+      name      = toset(lookup(var.vm_plan, "name", null))
+      product   = toset(lookup(var.vm_plan, "product", null))
+      publisher = toset(lookup(var.source_image_reference, "publisher", null))
     }
   }
 
@@ -85,9 +94,17 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
 }
 
 module "os_calculator" {
-  source = "registry.terraform.io/libre-devops/win-os-sku-calculator/azurerm"
+  source = "registry.terraform.io/libre-devops/windows-os-sku-calculator/azurerm"
 
   count = try(var.use_simple_image, null) == true ? 1 : 0
+
+  vm_os_simple = var.vm_os_simple
+}
+
+module "os_calculator_with_plan" {
+  source = "registry.terraform.io/libre-devops/windows-os-sku-with-plan-calculator/azurerm"
+
+  count = try(var.use_simple_image_with_plan, null) == true ? 1 : 0
 
   vm_os_simple = var.vm_os_simple
 }

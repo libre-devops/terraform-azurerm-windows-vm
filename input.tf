@@ -181,6 +181,12 @@ variable "use_simple_image" {
   type        = bool
 }
 
+variable "use_simple_image_with_plan" {
+  default     = false
+  description = "If you are using the Windows OS Sku Calculator with plan, set this to true. Default is false"
+  type        = bool
+}
+
 variable "vm_amount" {
   description = "A number, with the amount of VMs which is expected to be created"
   type        = number
@@ -235,8 +241,8 @@ variable "vm_os_version" {
 
 variable "vm_plan" {
   description = "Used for VMs which requires a plan"
-  type        = set(string)
-  default     = null
+  type        = map(any)
+  default     = {}
 }
 
 variable "vm_size" {
