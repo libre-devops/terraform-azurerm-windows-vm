@@ -23,7 +23,7 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
   provision_vm_agent         = var.provision_vm_agent
 
   dynamic "source_image_reference" {
-    for_each = try(var.use_simple_image, null) == true ? [1] : []
+    for_each = try(var.use_simple_image, null) == true && try(var.use_simple_image_with_plan, null) == false ? [1] : []
     content {
       publisher = var.vm_os_id == "" ? coalesce(var.vm_os_publisher, module.os_calculator[0].calculated_value_os_publisher) : ""
       offer     = var.vm_os_id == "" ? coalesce(var.vm_os_offer, module.os_calculator[0].calculated_value_os_offer) : ""
@@ -33,7 +33,7 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
   }
 
   dynamic "source_image_reference" {
-    for_each = try(var.use_simple_image, null) == false ? [1] : []
+    for_each = try(var.use_simple_image, null) == false && try(var.use_simple_image_with_plan, null) == false ? [1] : []
     content {
       publisher = lookup(var.source_image_reference, "publisher", null)
       offer     = lookup(var.source_image_reference, "offer", null)
@@ -43,7 +43,7 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
   }
 
   dynamic "plan" {
-    for_each = try(var.use_simple_image_with_plan, null) == true ? [1] : []
+    for_each = try(var.use_simple_image, null) == true && try(var.use_simple_image_with_plan, null) == true ? [1] : []
     content {
       name      = var.vm_os_id == "" ? coalesce(var.vm_os_sku, module.os_calculator_with_plan[0].calculated_value_os_sku) : ""
       product   = var.vm_os_id == "" ? coalesce(var.vm_os_offer, module.os_calculator_with_plan[0].calculated_value_os_offer) : ""
@@ -52,7 +52,7 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
   }
 
   dynamic "plan" {
-    for_each = try(var.use_simple_image_with_plan, null) == false ? [1] : []
+    for_each = try(var.use_simple_image, null) == false && try(var.use_simple_image_with_plan, null) == true ? [1] : []
     content {
       name      = toset(lookup(var.vm_plan, "name", null))
       product   = toset(lookup(var.vm_plan, "product", null))
