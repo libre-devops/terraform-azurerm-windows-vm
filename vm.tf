@@ -62,7 +62,7 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
   }
 
   dynamic "plan" {
-    for_each = try(var.use_simple_image, null) == true && try(var.use_simple_image_with_plan, null) == true ? [1] : []
+    for_each = try(var.use_simple_image, null) == true && try(var.use_simple_image_with_plan, null) == true > 0 ? [1] : []
     content {
       name      = var.vm_os_id == "" ? coalesce(var.vm_os_sku, module.os_calculator_with_plan[0].calculated_value_os_sku) : ""
       product   = var.vm_os_id == "" ? coalesce(var.vm_os_offer, module.os_calculator_with_plan[0].calculated_value_os_offer) : ""
@@ -70,8 +70,20 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
     }
   }
 
+  // Uses your own image with custom plan
+  dynamic "source_image_reference" {
+    for_each = try(var.use_simple_image, null) == false && try(var.use_simple_image_with_plan, null) == false && length(var.plan) > 0 ? [1] : []
+    content {
+      publisher = lookup(var.source_image_reference, "publisher", null)
+      offer     = lookup(var.source_image_reference, "offer", null)
+      sku       = lookup(var.source_image_reference, "sku", null)
+      version   = lookup(var.source_image_reference, "version", null)
+    }
+  }
+
+
   dynamic "plan" {
-    for_each = try(var.use_simple_image, null) == false && try(var.use_simple_image_with_plan, null) == false ? [1] : []
+    for_each = try(var.use_simple_image, null) == false && try(var.use_simple_image_with_plan, null) == false && length(var.plan) > 0 ? [1] : []
     content {
       name      = lookup(var.plan, "name", null)
       product   = lookup(var.plan, "product", null)
