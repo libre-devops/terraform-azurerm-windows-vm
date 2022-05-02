@@ -169,16 +169,16 @@ variable "timezone" {
   type        = string
 }
 
-variable "use_custom_image" {
-  description = "Boolean flag to notify when the custom image is used."
-  type        = map(any)
-  default     = {}
-}
-
 variable "use_simple_image" {
   default     = true
   description = "Whether the module should use the simple OS calculator module, default is true"
   type        = bool
+}
+
+variable "custom_image_settings" {
+  default     = {}
+  description = "Whether the module should use the a custom image"
+  type        = map(any)
 }
 
 variable "vm_amount" {

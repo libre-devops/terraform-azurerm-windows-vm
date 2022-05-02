@@ -42,13 +42,13 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
   }
 
   dynamic "source_image_reference" {
-    for_each = lookup(var.use_custom_image, "source_image_reference", {}) != {} ? [1] : []
+    for_each = try(var.use_simple_image, null) == false ? lookup(var.custom_image_settings, "source_image_reference", {}) : []
 
     content {
-      publisher = lookup(var.use_custom_image.source_image_reference, "publisher", null)
-      offer     = lookup(var.use_custom_image.source_image_reference, "offer", null)
-      sku       = lookup(var.use_custom_image.source_image_reference, "sku", null)
-      version   = lookup(var.use_custom_image.source_image_reference, "version", null)
+      publisher = lookup(var.custom_image_settings.source_image_reference, "publisher", null)
+      offer     = lookup(var.custom_image_settings.source_image_reference, "offer", null)
+      sku       = lookup(var.custom_image_settings.source_image_reference, "sku", null)
+      version   = lookup(var.custom_image_settings.source_image_reference, "version", null)
     }
   }
 
