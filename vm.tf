@@ -1,5 +1,11 @@
 resource "azurerm_windows_virtual_machine" "windows_vm" {
 
+  // Forces acceptance of marketplace terms before creating a VM
+  depends_on = [
+    azurerm_marketplace_agreement.plan_acceptance_simple[count.index],
+    azurerm_marketplace_agreement.plan_acceptance_custom[count.index]
+  ]
+
   count                    = var.vm_amount
   name                     = "${var.vm_hostname}${format("%02d", count.index + 1)}"
   resource_group_name      = var.rg_name
@@ -133,8 +139,18 @@ module "os_calculator_with_plan" {
 
 // Use these modules and accept these terms at your own peril
 resource "azurerm_marketplace_agreement" "plan_acceptance_simple" {
-  count     = try(var.use_simple_image_with_plan, null) == true ? 1 : 0
+  count = try(var.use_simple_image_with_plan, null) == true ? 1 : 0
+
   publisher = coalesce(var.vm_os_publisher, module.os_calculator_with_plan[0].calculated_value_os_publisher)
   offer     = coalesce(var.vm_os_offer, module.os_calculator_with_plan[0].calculated_value_os_offer)
   plan      = coalesce(var.vm_os_sku, module.os_calculator_with_plan[0].calculated_value_os_sku)
+}
+
+// Use these modules and accept these terms at your own peril
+resource "azurerm_marketplace_agreement" "plan_acceptance_custom" {
+  count = try(var.use_simple_image, null) == false && try(var.use_simple_image_with_plan, null) == false ? 1 : 0
+
+  publisher = lookup(var.source_image_reference.plan, "publisher", null)
+  offer     = lookup(var.source_image_reference.plan, "product", null)
+  plan      = lookup(var.source_image_reference.plan, "name", null)
 }
