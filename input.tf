@@ -98,6 +98,12 @@ variable "pip_name" {
   type        = string
 }
 
+variable "plan" {
+  description = "When a plan VM is used with a image not in the calculator, this will contain the variables used"
+  type        = map(any)
+  default     = {}
+}
+
 variable "provision_vm_agent" {
   description = "Whether the Azure agent is installed on this VM, default is true"
   type        = bool
@@ -153,12 +159,6 @@ variable "storage_account_type" {
   description = "Defines the type of storage account to be created. Valid options are Standard_LRS, Standard_ZRS, Standard_GRS, Standard_RAGRS, Premium_LRS."
   type        = string
   default     = "Standard_LRS"
-}
-
-variable "plan" {
-  description = "When a plan VM is used with a image not in the calculator, this will contain the variables used"
-  type        = map(any)
-  default     = {}
 }
 
 variable "subnet_id" {
