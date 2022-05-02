@@ -155,6 +155,12 @@ variable "storage_account_type" {
   default     = "Standard_LRS"
 }
 
+variable "plan" {
+  description = "When a plan VM is used with a image not in the calculator, this will contain the variables used"
+  type        = map(any)
+  default     = {}
+}
+
 variable "subnet_id" {
   type        = string
   description = "The subnet ID for the NICs which are created with the VMs to be added to"

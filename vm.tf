@@ -84,9 +84,9 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
   dynamic "plan" {
     for_each = try(var.use_simple_image, null) == false && try(var.use_simple_image_with_plan, null) == false ? [1] : []
     content {
-      name      = lookup(var.source_image_reference.plan, "name", null)
-      product   = lookup(var.source_image_reference.plan, "product", null)
-      publisher = lookup(var.source_image_reference.plan, "publisher", null)
+      name      = lookup(var.plan, "name", null)
+      product   = lookup(var.plan, "product", null)
+      publisher = lookup(var.plan, "publisher", null)
     }
   }
 
