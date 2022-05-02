@@ -139,7 +139,7 @@ resource "azurerm_marketplace_agreement" "plan_acceptance_simple" {
 
 // Use these modules and accept these terms at your own peril
 resource "azurerm_marketplace_agreement" "plan_acceptance_custom" {
-  count = try(var.use_simple_image, null) == false && try(var.use_simple_image_with_plan, null) == false && try(var.plan, null) != null ? 1 : 0
+  count = try(var.use_simple_image, null) == false && try(var.use_simple_image_with_plan, null) == false && length(var.plan) > 0 ? 1 : 0
 
   publisher = lookup(var.plan, "publisher", null)
   offer     = lookup(var.plan, "product", null)
