@@ -70,12 +70,6 @@ variable "identity_type" {
   default     = ""
 }
 
-variable "is_custom_image" {
-  description = "Boolean flag to notify when the custom image is used."
-  type        = bool
-  default     = false
-}
-
 variable "license_type" {
   description = "Specifies the BYOL Type for this Virtual Machine. This is only applicable to Windows Virtual Machines. Possible values are Windows_Client and Windows_Server"
   type        = string
@@ -175,6 +169,19 @@ variable "timezone" {
   type        = string
 }
 
+variable "use_simple_image" {
+  default     = true
+  description = "Whether the module should use the simple OS calculator module, default is true"
+  type        = bool
+}
+
+variable "use_custom_image" {
+  description = "Boolean flag to notify when the custom image is used."
+  type        = bool
+  default     = false
+}
+
+
 variable "vm_amount" {
   description = "A number, with the amount of VMs which is expected to be created"
   type        = number
@@ -238,3 +245,4 @@ variable "vm_size" {
   type        = string
   default     = "Standard_B2ms"
 }
+

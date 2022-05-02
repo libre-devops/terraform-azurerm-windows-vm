@@ -22,26 +22,30 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
   allow_extension_operations = var.allow_extension_operations
   provision_vm_agent         = var.provision_vm_agent
 
-  source_image_reference {
-    publisher = var.vm_os_id == "" ? coalesce(var.vm_os_publisher, module.os_calculator.calculated_value_os_publisher) : ""
-    offer     = var.vm_os_id == "" ? coalesce(var.vm_os_offer, module.os_calculator.calculated_value_os_offer) : ""
-    sku       = var.vm_os_id == "" ? coalesce(var.vm_os_sku, module.os_calculator.calculated_value_os_sku) : ""
-    version   = var.vm_os_id == "" ? var.vm_os_version : ""
+  dynamic "source_image_reference" {
+    for_each = try(var.use_simple_image, null) == true ? [1] : []
+    content {
+      publisher = var.vm_os_id == "" ? coalesce(var.vm_os_publisher, module.os_calculator.calculated_value_os_publisher) : ""
+      offer     = var.vm_os_id == "" ? coalesce(var.vm_os_offer, module.os_calculator.calculated_value_os_offer) : ""
+      sku       = var.vm_os_id == "" ? coalesce(var.vm_os_sku, module.os_calculator.calculated_value_os_sku) : ""
+      version   = var.vm_os_id == "" ? var.vm_os_version : ""
+    }
+  }
+  dynamic "source_image_reference" {
+    for_each = lookup(var.use_custom_image, "source_image_reference", {}) != {} ? [1] : []
+
+    content {
+      publisher = lookup(var.use_custom_image.source_image_reference, "publisher", null)
+      offer     = lookup(var.use_custom_image.source_image_reference, "offer", null)
+      sku       = lookup(var.use_custom_image.source_image_reference, "sku", null)
+      version   = lookup(var.use_custom_image.source_image_reference, "version", null)
+    }
   }
 
   dynamic "identity" {
     for_each = length(var.identity_ids) == 0 && var.identity_type == "SystemAssigned" ? [var.identity_type] : []
     content {
       type = var.identity_type
-    }
-  }
-
-  dynamic "plan" {
-    for_each = toset(var.vm_plan != null ? ["fake"] : [])
-    content {
-      name      = lookup(var.vm_plan, "name", null)
-      product   = lookup(var.vm_plan, "product", null)
-      publisher = lookup(var.vm_plan, "publisher", null)
     }
   }
 
@@ -73,6 +77,8 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
 
 module "os_calculator" {
   source = "registry.terraform.io/libre-devops/win-os-sku-calculator/azurerm"
+
+  count = try(var.use_simple_image, null) == true ? [1] : []
 
   vm_os_simple = var.vm_os_simple
 }
