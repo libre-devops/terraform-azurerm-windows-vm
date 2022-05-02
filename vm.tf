@@ -62,7 +62,7 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
   }
 
   dynamic "plan" {
-    for_each = try(var.use_simple_image, null) == true && try(var.use_simple_image_with_plan, null) == true > 0 ? [1] : []
+    for_each = try(var.use_simple_image, null) == true && try(var.use_simple_image_with_plan, null) == true ? [1] : []
     content {
       name      = var.vm_os_id == "" ? coalesce(var.vm_os_sku, module.os_calculator_with_plan[0].calculated_value_os_sku) : ""
       product   = var.vm_os_id == "" ? coalesce(var.vm_os_offer, module.os_calculator_with_plan[0].calculated_value_os_offer) : ""
