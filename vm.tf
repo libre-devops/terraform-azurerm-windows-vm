@@ -70,17 +70,6 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
     }
   }
 
-  // To be used when a custom image is wanted without the simple OS module, which has a plan attached
-  dynamic "source_image_reference" {
-    for_each = try(var.use_simple_image, null) == false && try(var.use_simple_image_with_plan, null) == false ? [1] : []
-    content {
-      publisher = lookup(var.source_image_reference, "publisher", null)
-      offer     = lookup(var.source_image_reference, "offer", null)
-      sku       = lookup(var.source_image_reference, "sku", null)
-      version   = lookup(var.source_image_reference, "version", null)
-    }
-  }
-
   dynamic "plan" {
     for_each = try(var.use_simple_image, null) == false && try(var.use_simple_image_with_plan, null) == false ? [1] : []
     content {
