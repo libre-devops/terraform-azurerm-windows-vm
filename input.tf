@@ -171,8 +171,8 @@ variable "timezone" {
 
 variable "use_custom_image" {
   description = "Boolean flag to notify when the custom image is used."
-  type        = bool
-  default     = false
+  type        = map(any)
+  default     = {}
 }
 
 variable "use_simple_image" {
