@@ -25,9 +25,9 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
   dynamic "source_image_reference" {
     for_each = try(var.use_simple_image, null) == true ? [1] : []
     content {
-      publisher = var.vm_os_id == "" ? coalesce(var.vm_os_publisher, module.os_calculator.calculated_value_os_publisher) : ""
-      offer     = var.vm_os_id == "" ? coalesce(var.vm_os_offer, module.os_calculator.calculated_value_os_offer) : ""
-      sku       = var.vm_os_id == "" ? coalesce(var.vm_os_sku, module.os_calculator.calculated_value_os_sku) : ""
+      publisher = var.vm_os_id == "" ? coalesce(var.vm_os_publisher, module.os_calculator[0].calculated_value_os_publisher) : ""
+      offer     = var.vm_os_id == "" ? coalesce(var.vm_os_offer, module.os_calculator[0].calculated_value_os_offer) : ""
+      sku       = var.vm_os_id == "" ? coalesce(var.vm_os_sku, module.os_calculator[0].calculated_value_os_sku) : ""
       version   = var.vm_os_id == "" ? var.vm_os_version : ""
     }
   }
