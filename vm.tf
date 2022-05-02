@@ -130,3 +130,11 @@ module "os_calculator_with_plan" {
 
   vm_os_simple = var.vm_os_simple
 }
+
+// Use these modules and accept these terms at your own peril
+resource "azurerm_marketplace_agreement" "plan_acceptance_simple" {
+  count     = try(var.use_simple_image_with_plan, null) == true ? 1 : 0
+  publisher = coalesce(var.vm_os_publisher, module.os_calculator_with_plan[0].calculated_value_os_publisher)
+  offer     = coalesce(var.vm_os_offer, module.os_calculator_with_plan[0].calculated_value_os_offer)
+  plan      = coalesce(var.vm_os_sku, module.os_calculator_with_plan[0].calculated_value_os_sku)
+}
