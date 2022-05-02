@@ -2,8 +2,8 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
 
   // Forces acceptance of marketplace terms before creating a VM
   depends_on = [
-    azurerm_marketplace_agreement.plan_acceptance_simple[count.index],
-    azurerm_marketplace_agreement.plan_acceptance_custom[count.index]
+    "azurerm_marketplace_agreement.plan_acceptance_simple",
+    "azurerm_marketplace_agreement.plan_acceptance_custom"
   ]
 
   count                    = var.vm_amount
