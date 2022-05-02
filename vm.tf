@@ -42,7 +42,7 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
   }
 
   dynamic "source_image_reference" {
-    for_each = try(var.use_simple_image, null) == false ? lookup(var.custom_image_settings, "source_image_reference", {}) : []
+    for_each = try(var.use_simple_image, null) != true ? lookup(var.custom_image_settings, "source_image_reference", {}) : null
 
     content {
       publisher = lookup(var.custom_image_settings.source_image_reference, "publisher", null)
