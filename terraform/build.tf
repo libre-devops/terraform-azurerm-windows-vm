@@ -38,7 +38,7 @@ module "win_vm_simple" {
 
   vm_amount          = 1
   vm_hostname        = "win${var.short}${var.loc}${terraform.workspace}" // winldoeuwdev01 & winldoeuwdev02 & winldoeuwdev03
-  vm_size            = "Standard_B2ms"
+  vm_size            = "Standard_D4s_v3"
   use_simple_image   = true
   vm_os_simple       = "WindowsServer2019"
   vm_os_disk_size_gb = "127"
