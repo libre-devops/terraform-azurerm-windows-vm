@@ -18,6 +18,7 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
   admin_username           = var.admin_username
   admin_password           = var.admin_password
   size                     = var.vm_size
+  source_image_id          = try(var.use_custom_image, null) == true ? var.custom_source_image_id : null
   zone                     = var.availability_zone == "alternate" ? (count.index % 3) + 1 : null // Alternates zones for VMs in count, 1, 2 then 3. Use availability set if you want HA.
   timezone                 = var.timezone
 
@@ -30,7 +31,7 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
 
   // Uses calculator
   dynamic "source_image_reference" {
-    for_each = try(var.use_simple_image, null) == true && try(var.use_simple_image_with_plan, null) == false ? [1] : []
+    for_each = try(var.use_simple_image, null) == true && try(var.use_simple_image_with_plan, null) == false && try(var.use_custom_image, null) == false ? [1] : []
     content {
       publisher = var.vm_os_id == "" ? coalesce(var.vm_os_publisher, module.os_calculator[0].calculated_value_os_publisher) : ""
       offer     = var.vm_os_id == "" ? coalesce(var.vm_os_offer, module.os_calculator[0].calculated_value_os_offer) : ""
@@ -41,7 +42,7 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
 
   // Uses your own source image
   dynamic "source_image_reference" {
-    for_each = try(var.use_simple_image, null) == false && try(var.use_simple_image_with_plan, null) == false && length(var.source_image_reference) > 0 && length(var.plan) == 0 ? [1] : []
+    for_each = try(var.use_simple_image, null) == false && try(var.use_simple_image_with_plan, null) == false && length(var.source_image_reference) > 0 && length(var.plan) == 0 && try(var.use_custom_image, null) == false ? [1] : []
     content {
       publisher = lookup(var.source_image_reference, "publisher", null)
       offer     = lookup(var.source_image_reference, "offer", null)
@@ -52,7 +53,7 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
 
   // To be used when a VM with a plan is used
   dynamic "source_image_reference" {
-    for_each = try(var.use_simple_image, null) == true && try(var.use_simple_image_with_plan, null) == true ? [1] : []
+    for_each = try(var.use_simple_image, null) == true && try(var.use_simple_image_with_plan, null) == true && try(var.use_custom_image, null) == false ? [1] : []
     content {
       publisher = var.vm_os_id == "" ? coalesce(var.vm_os_publisher, module.os_calculator_with_plan[0].calculated_value_os_publisher) : ""
       offer     = var.vm_os_id == "" ? coalesce(var.vm_os_offer, module.os_calculator_with_plan[0].calculated_value_os_offer) : ""
@@ -62,7 +63,7 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
   }
 
   dynamic "plan" {
-    for_each = try(var.use_simple_image, null) == true && try(var.use_simple_image_with_plan, null) == true ? [1] : []
+    for_each = try(var.use_simple_image, null) == true && try(var.use_simple_image_with_plan, null) == true && try(var.use_custom_image, null) == false ? [1] : []
     content {
       name      = var.vm_os_id == "" ? coalesce(var.vm_os_sku, module.os_calculator_with_plan[0].calculated_value_os_sku) : ""
       product   = var.vm_os_id == "" ? coalesce(var.vm_os_offer, module.os_calculator_with_plan[0].calculated_value_os_offer) : ""
@@ -72,7 +73,7 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
 
   // Uses your own image with custom plan
   dynamic "source_image_reference" {
-    for_each = try(var.use_simple_image, null) == false && try(var.use_simple_image_with_plan, null) == false && length(var.plan) > 0 ? [1] : []
+    for_each = try(var.use_simple_image, null) == false && try(var.use_simple_image_with_plan, null) == false && length(var.plan) > 0 && try(var.use_custom_image, null) == false ? [1] : []
     content {
       publisher = lookup(var.source_image_reference, "publisher", null)
       offer     = lookup(var.source_image_reference, "offer", null)
@@ -83,7 +84,7 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
 
 
   dynamic "plan" {
-    for_each = try(var.use_simple_image, null) == false && try(var.use_simple_image_with_plan, null) == false && length(var.plan) > 0 ? [1] : []
+    for_each = try(var.use_simple_image, null) == false && try(var.use_simple_image_with_plan, null) == false && length(var.plan) > 0 && try(var.use_custom_image, null) == false ? [1] : []
     content {
       name      = lookup(var.plan, "name", null)
       product   = lookup(var.plan, "product", null)
@@ -118,7 +119,7 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
   }
 
   boot_diagnostics {
-    storage_account_uri = null // Use managed storage account
+    storage_account_uri = {} // Use managed storage account
   }
 
   tags = var.tags
@@ -142,7 +143,7 @@ module "os_calculator_with_plan" {
 
 // Use these modules and accept these terms at your own peril
 resource "azurerm_marketplace_agreement" "plan_acceptance_simple" {
-  count = try(var.use_simple_image_with_plan, null) == true ? 1 : 0
+  count = try(var.use_simple_image_with_plan, null) == true && try(var.accept_plan, null) == true && try(var.use_custom_image, null) == false ? 1 : 0
 
   publisher = coalesce(var.vm_os_publisher, module.os_calculator_with_plan[0].calculated_value_os_publisher)
   offer     = coalesce(var.vm_os_offer, module.os_calculator_with_plan[0].calculated_value_os_offer)
@@ -151,7 +152,7 @@ resource "azurerm_marketplace_agreement" "plan_acceptance_simple" {
 
 // Use these modules and accept these terms at your own peril
 resource "azurerm_marketplace_agreement" "plan_acceptance_custom" {
-  count = try(var.use_simple_image, null) == false && try(var.use_simple_image_with_plan, null) == false && length(var.plan) > 0 ? 1 : 0
+  count = try(var.use_simple_image, null) == false && try(var.use_simple_image_with_plan, null) == false && length(var.plan) > 0 && try(var.accept_plan, null) == true && try(var.use_custom_image, null) == false ? 1 : 0
 
   publisher = lookup(var.plan, "publisher", null)
   offer     = lookup(var.plan, "product", null)
