@@ -119,7 +119,7 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
   }
 
   boot_diagnostics {
-    storage_account_uri = {} // Use managed storage account
+    storage_account_uri = null // Use managed storage account
   }
 
   tags = var.tags
