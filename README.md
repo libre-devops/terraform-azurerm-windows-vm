@@ -1,145 +1,359 @@
-## Info
-
-This module follows the KISS design pattern compared to other modules in the market.  
-
-It does not try to do anything crazy and consider availability sets, scale sets etc, this will create you a VM based on some parameters you give it, nothing more, nothing less.
-
 ```hcl
-// Default behaviour uses "registry.terraform.io/libre-devops/windows-os-plan-calculator/azurerm"
-module "win_vm_simple" {
-  source = "registry.terraform.io/libre-devops/windows-vm/azurerm"
+resource "azurerm_public_ip" "pip" {
+  for_each = { for vm in var.windows_vms : vm.name => vm if vm.public_ip_sku != null }
 
-  rg_name  = module.rg.rg_name
-  location = module.rg.rg_location
-  tags     = module.rg.rg_tags
+  name                = each.value.pip_name != null ? each.value.pip_name : "pip-${each.value.name}"
+  location            = var.location
+  resource_group_name = var.rg_name
+  allocation_method   = each.value.allocation_method
+  domain_name_label   = try(each.value.pip_custom_dns_label, each.value.computer_name, null)
+  sku                 = each.value.public_ip_sku
+  tags                = var.tags
 
-  vm_amount          = 1
-  vm_hostname        = "win${var.short}${var.loc}${terraform.workspace}" // winldoeuwdev01 & winldoeuwdev02 & winldoeuwdev03
-  vm_size            = "Standard_B2ms"
-  use_simple_image   = true
-  vm_os_simple       = "WindowsServer2019"
-  vm_os_disk_size_gb = "127"
-
-  asg_name = "asg-${element(regexall("[a-z]+", element(module.win_vm_simple.vm_name, 0)), 0)}-${var.short}-${var.loc}-${terraform.workspace}-01" //asg-vmldoeuwdev-ldo-euw-dev-01 - Regex strips all numbers from string
-
-  admin_username = "LibreDevOpsAdmin"
-  admin_password = data.azurerm_key_vault_secret.mgmt_local_admin_pwd.value // Created with the Libre DevOps Terraform Pre-Requisite script
-
-  subnet_id            = element(values(module.network.subnets_ids), 0) // Places in sn1-vnet-ldo-euw-dev-01
-  availability_zone    = "alternate"                                    // If more than 1 VM exists, places them in alterate zones, 1, 2, 3 then resetting.  If you want HA, use an availability set.
-  storage_account_type = "Standard_LRS"
-  identity_type        = "SystemAssigned"
+  lifecycle {
+    ignore_changes = [domain_name_label]
+  }
 }
 
-// Want to use this module without the SKU calculator? Try something like this:
-module "win_vm_with_custom_image" {
-  source = "registry.terraform.io/libre-devops/windows-vm/azurerm"
+resource "azurerm_network_interface" "nic" {
+  for_each = { for vm in var.windows_vms : vm.name => vm }
 
-  rg_name  = module.rg.rg_name
-  location = module.rg.rg_location
-  tags     = module.rg.rg_tags
+  name                          = each.value.nic_name != null ? each.value.nic_name : "nic-${each.value.name}"
+  location                      = var.location
+  resource_group_name           = var.rg_name
+  enable_accelerated_networking = each.value.enable_accelerated_networking
 
-  vm_amount   = 1
-  vm_hostname = "vm${var.short}${var.loc}${terraform.workspace}" // vmldoeuwdev01
-  vm_size     = "Standard_B2ms"
-
-  use_simple_image = false
-  source_image_reference = {
-    publisher = "MicrosoftWindowsServer"
-    offer     = "WindowsServer"
-    sku       = "2019-Datacenter"
-    version   = "latest"
+  ip_configuration {
+    name                          = each.value.nic_ipconfig_name != null ? each.value.nic_ipconfig_name : "nic-ipcon-${each.value.name}"
+    primary                       = true
+    private_ip_address_allocation = each.value.static_private_ip == null ? "Dynamic" : "Static"
+    private_ip_address            = each.value.static_private_ip
+    public_ip_address_id          = lookup(each.value, "public_ip_sku", null) == null ? null : azurerm_public_ip.pip[each.key].id
+    subnet_id                     = each.value.subnet_id
   }
+  tags = var.tags
 
-  vm_os_disk_size_gb = "127"
-
-  asg_name = "asg-${element(regexall("[a-z]+", element(module.win_vm_with_custom_image.vm_name, 0)), 0)}-${var.short}-${var.loc}-${terraform.workspace}-01" //asg-vmldoeuwdev-ldo-euw-dev-01 - Regex strips all numbers from string
-
-  admin_username = "LibreDevOpsAdmin"
-  admin_password = data.azurerm_key_vault_secret.mgmt_local_admin_pwd.value // Created with the Libre DevOps Terraform Pre-Requisite script
-
-  subnet_id            = element(values(module.network.subnets_ids), 0) // Places in sn1-vnet-ldo-euw-dev-01
-  availability_zone    = "alternate"                                    // If more than 1 VM exists, places them in alterate zones, 1, 2, 3 then resetting.  If you want HA, use an availability set.
-  storage_account_type = "Standard_LRS"
-  identity_type        = "UserAssigned"
-  identity_ids         = [data.azurerm_user_assigned_identity.mgmt_user_assigned_id.id]
+  timeouts {
+    create = "5m"
+    delete = "10m"
+  }
 }
 
-// Sometimes you may want an image like the CIS images, these are part of a plan rather than the platform images.  You can use the ""registry.terraform.io/libre-devops/windows-os-plan-with-plan-calculator/azurerm""
-module "win_vm_with_plan" {
-  source = "registry.terraform.io/libre-devops/windows-vm/azurerm"
+resource "azurerm_application_security_group" "asg" {
+  for_each = { for vm in var.windows_vms : vm.name => vm if vm.create_asg == true }
 
-  rg_name  = module.rg.rg_name
-  location = module.rg.rg_location
-  tags     = module.rg.rg_tags
-
-  vm_amount   = 1
-  vm_hostname = "vm${var.short}${var.loc}${terraform.workspace}" // vmldoeuwdev01
-  vm_size     = "Standard_B2ms"
-
-  use_simple_image_with_plan = true
-  vm_os_simple               = "CISWindowsServer2019L1"
-
-  vm_os_disk_size_gb = "127"
-
-  asg_name = "asg-${element(regexall("[a-z]+", element(module.win_vm_with_plan.vm_name, 0)), 0)}-${var.short}-${var.loc}-${terraform.workspace}-01" //asg-vmldoeuwdev-ldo-euw-dev-01 - Regex strips all numbers from string
-
-  admin_username = "LibreDevOpsAdmin"
-  admin_password = data.azurerm_key_vault_secret.mgmt_local_admin_pwd.value // Created with the Libre DevOps Terraform Pre-Requisite script
-
-  subnet_id            = element(values(module.network.subnets_ids), 0) // Places in sn1-vnet-ldo-euw-dev-01
-  availability_zone    = "alternate"                                    // If more than 1 VM exists, places them in alterate zones, 1, 2, 3 then resetting.  If you want HA, use an availability set.
-  storage_account_type = "Standard_LRS"
-  identity_type        = "UserAssigned"
-  identity_ids         = [data.azurerm_user_assigned_identity.mgmt_user_assigned_id.id]
+  name                = each.value.asg_name != null ? each.value.asg_name : "asg-${each.value.name}"
+  location            = var.location
+  resource_group_name = var.rg_name
+  tags                = var.tags
 }
 
-// Don't want to use either? No problem.  Try this:
-module "win_vm_with_custom_plan" {
-  source = "registry.terraform.io/libre-devops/windows-vm/azurerm"
+resource "azurerm_network_interface_application_security_group_association" "asg_association" {
+  for_each = { for vm in var.windows_vms : vm.name => vm }
 
-  rg_name  = module.rg.rg_name
-  location = module.rg.rg_location
-  tags     = module.rg.rg_tags
+  network_interface_id          = azurerm_network_interface.nic[each.key].id
+  application_security_group_id = each.value.asg_id != null ? each.value.asg_id : azurerm_application_security_group.asg[each.key].id
+}
 
-  vm_amount   = 1
-  vm_hostname = "app${var.short}${var.loc}${terraform.workspace}" // appldoeuwdev01
-  vm_size     = "Standard_B2ms"
 
-  use_simple_image           = false
-  use_simple_image_with_plan = false
+resource "random_integer" "zone" {
+  for_each = { for vm in var.windows_vms : vm.name => vm if vm.availability_zone == "random" }
+  min      = 1
+  max      = 3
+}
 
-  source_image_reference = {
-    publisher = "center-for-internet-security-inc"
-    offer     = "cis-windows-server-2016-v1-0-0-l2"
-    sku       = "cis-ws2016-l2"
-    version   = "latest"
+locals {
+  sanitized_names = { for vm in var.windows_vms : vm.name => upper(replace(replace(replace(vm.name, " ", ""), "-", ""), "_", "")) }
+  netbios_names   = { for key, value in local.sanitized_names : key => substr(value, 0, min(length(value), 15)) }
+  random_zones    = { for idx, vm in var.windows_vms : vm.name => vm.availability_zone == "random" ? tostring(idx + 1) : vm.availability_zone }
+}
+
+resource "azurerm_windows_virtual_machine" "this" {
+  for_each = { for vm in var.windows_vms : vm.name => vm }
+
+  // Forces acceptance of marketplace terms before creating a VM
+  depends_on = [
+    azurerm_marketplace_agreement.plan_acceptance_simple,
+    azurerm_marketplace_agreement.plan_acceptance_custom
+  ]
+
+  name                         = each.value.name
+  resource_group_name          = var.rg_name
+  location                     = var.location
+  network_interface_ids        = [azurerm_network_interface.nic[each.key].id]
+  license_type                 = each.value.license_type
+  patch_mode                   = each.value.patch_mode
+  enable_automatic_updates     = each.value.enable_automatic_updates
+  computer_name                = each.value.computer_name != null ? each.value.computer_name : local.netbios_names[each.key]
+  admin_username               = each.value.admin_username
+  admin_password               = each.value.admin_password
+  size                         = each.value.vm_size
+  source_image_id              = try(each.value.use_custom_image, null) == true ? each.value.custom_source_image_id : null
+  zone                         = local.random_zones[each.key]
+  availability_set_id          = each.value.availability_set_id
+  virtual_machine_scale_set_id = each.value.virtual_machine_scale_set_id
+  timezone                     = each.value.timezone
+  user_data                    = each.value.user_data
+  custom_data                  = each.value.custom_data
+  tags                         = var.tags
+
+  encryption_at_host_enabled = each.value.enable_encryption_at_host
+  allow_extension_operations = each.value.allow_extension_operations
+  provision_vm_agent         = each.value.provision_vm_agent
+
+  dynamic "additional_capabilities" {
+    for_each = each.value.ultra_ssd_enabled ? [1] : []
+    content {
+      ultra_ssd_enabled = each.value.ultra_ssd_enabled
+    }
   }
 
-  plan = {
-    name      = "cis-ws2016-l2"
-    product   = "cis-windows-server-2016-v1-0-0-l2"
-    publisher = "center-for-internet-security-inc"
+  # Use simple image
+  dynamic "source_image_reference" {
+    for_each = try(each.value.use_simple_image, null) == true && try(each.value.use_simple_image_with_plan, null) == false && try(each.value.use_custom_image, null) == false ? [1] : []
+    content {
+      publisher = coalesce(each.value.vm_os_publisher, module.os_calculator[each.value.name].calculated_value_os_publisher)
+      offer     = coalesce(each.value.vm_os_offer, module.os_calculator[each.value.name].calculated_value_os_offer)
+      sku       = coalesce(each.value.vm_os_sku, module.os_calculator[each.value.name].calculated_value_os_sku)
+      version   = coalesce(each.value.vm_os_version, "latest")
+    }
   }
 
-  vm_os_disk_size_gb = "127"
 
-  asg_name = "asg-${element(regexall("[a-z]+", element(module.win_vm_with_custom_plan.vm_name, 0)), 0)}-${var.short}-${var.loc}-${terraform.workspace}-01" //asg-vmldoeuwdev-ldo-euw-dev-01 - Regex strips all numbers from string
+  # Use custom image reference
+  dynamic "source_image_reference" {
+    for_each = try(each.value.use_simple_image, null) == false && try(each.value.use_simple_image_with_plan, null) == false && try(length(each.value.source_image_reference), 0) > 0 && try(length(each.value.plan), 0) == 0 && try(each.value.use_custom_image, null) == false ? [1] : []
 
-  admin_username = "LibreDevOpsAdmin"
-  admin_password = data.azurerm_key_vault_secret.mgmt_local_admin_pwd.value // Created with the Libre DevOps Terraform Pre-Requisite script
+    content {
+      publisher = lookup(each.value.source_image_reference, "publisher", null)
+      offer     = lookup(each.value.source_image_reference, "offer", null)
+      sku       = lookup(each.value.source_image_reference, "sku", null)
+      version   = lookup(each.value.source_image_reference, "version", null)
+    }
+  }
 
-  subnet_id            = element(values(module.network.subnets_ids), 0) // Places in sn1-vnet-ldo-euw-dev-01
-  availability_zone    = "alternate"                                    // If more than 1 VM exists, places them in alterate zones, 1, 2, 3 then resetting.  If you want HA, use an availability set.
-  storage_account_type = "Standard_LRS"
-  identity_type        = "UserAssigned"
-  identity_ids         = [data.azurerm_user_assigned_identity.mgmt_user_assigned_id.id]
+  dynamic "source_image_reference" {
+    for_each = try(each.value.use_simple_image, null) == true && try(each.value.use_simple_image_with_plan, null) == true && try(each.value.use_custom_image, null) == false ? [1] : []
+
+    content {
+      publisher = coalesce(each.value.vm_os_publisher, module.os_calculator_with_plan[each.value.name].calculated_value_os_publisher)
+      offer     = coalesce(each.value.vm_os_offer, module.os_calculator_with_plan[each.value.name].calculated_value_os_offer)
+      sku       = coalesce(each.value.vm_os_sku, module.os_calculator_with_plan[each.value.name].calculated_value_os_sku)
+      version   = coalesce(each.value.vm_os_version, "latest")
+    }
+  }
+
+
+  dynamic "plan" {
+    for_each = try(each.value.use_simple_image, null) == false && try(each.value.use_simple_image_with_plan, null) == false && try(length(each.value.plan), 0) > 0 && try(each.value.use_custom_image, null) == false ? [1] : []
+
+    content {
+      name      = coalesce(each.value.vm_os_sku, module.os_calculator_with_plan[each.value.name].calculated_value_os_sku)
+      product   = coalesce(each.value.vm_os_offer, module.os_calculator_with_plan[each.value.name].calculated_value_os_offer)
+      publisher = coalesce(each.value.vm_os_publisher, module.os_calculator_with_plan[each.value.name].calculated_value_os_publisher)
+    }
+  }
+
+
+  dynamic "plan" {
+    for_each = try(each.value.use_simple_image, null) == false && try(each.value.use_simple_image_with_plan, null) == false && try(length(each.value.plan), 0) > 0 && try(each.value.use_custom_image, null) == false ? [1] : []
+
+    content {
+      name      = lookup(each.value.plan, "name", null)
+      product   = lookup(each.value.plan, "product", null)
+      publisher = lookup(each.value.plan, "publisher", null)
+    }
+  }
+
+
+  dynamic "identity" {
+    for_each = each.value.identity_type == "SystemAssigned" ? [each.value.identity_type] : []
+    content {
+      type = each.value.identity_type
+    }
+  }
+
+  dynamic "identity" {
+    for_each = each.value.identity_type == "SystemAssigned, UserAssigned" ? [each.value.identity_type] : []
+    content {
+      type         = each.value.identity_type
+      identity_ids = try(each.value.identity_ids, [])
+    }
+  }
+
+  dynamic "identity" {
+    for_each = each.value.identity_type == "UserAssigned" ? [each.value.identity_type] : []
+    content {
+      type         = each.value.identity_type
+      identity_ids = length(try(each.value.identity_ids, [])) > 0 ? each.value.identity_ids : []
+    }
+  }
+
+
+  priority        = try(each.value.spot_instance, false) ? "Spot" : "Regular"
+  max_bid_price   = try(each.value.spot_instance, false) ? each.value.spot_instance_max_bid_price : null
+  eviction_policy = try(each.value.spot_instance, false) ? each.value.spot_instance_eviction_policy : null
+
+  os_disk {
+    name                             = each.value.os_disk.name != null ? each.value.os_disk.name : "osdisk-${each.value.name}"
+    caching                          = each.value.os_disk.caching
+    storage_account_type             = each.value.os_disk.os_disk_type
+    disk_size_gb                     = each.value.os_disk.disk_size_gb
+    disk_encryption_set_id           = each.value.os_disk.disk_encryption_set_id
+    secure_vm_disk_encryption_set_id = each.value.os_disk.secure_vm_disk_encryption_set_id
+    security_encryption_type         = each.value.os_disk.security_encryption_type
+    write_accelerator_enabled        = each.value.os_disk.write_accelerator_enabled
+
+    dynamic "diff_disk_settings" {
+      for_each = each.value.os_disk.diff_disk_settings != null ? [each.value.os_disk.diff_disk_settings] : []
+      content {
+        option = diff_disk_settings.value.option
+      }
+    }
+  }
+
+  dynamic "boot_diagnostics" {
+    for_each = each.value.boot_diagnostics_storage_account_uri != null ? [each.value.boot_diagnostics_storage_account_uri] : [null]
+    content {
+      storage_account_uri = boot_diagnostics.value
+    }
+  }
+
+
+  dynamic "additional_unattend_content" {
+    for_each = each.value.additional_unattend_content != null ? each.value.additional_unattend_content : []
+    content {
+      content = additional_unattend_content.value.content
+      setting = additional_unattend_content.value.setting
+    }
+  }
+
+  dynamic "secret" {
+    for_each = each.value.secrets != null ? each.value.secrets : []
+    content {
+      key_vault_id = secret.value.key_vault_id
+
+      dynamic "certificate" {
+        for_each = secret.value.certificates
+        content {
+          store = certificate.value.store
+          url   = certificate.value.url
+        }
+      }
+    }
+  }
+
+  dynamic "termination_notification" {
+    for_each = each.value.termination_notification != null ? [each.value.termination_notification] : []
+    content {
+      enabled = termination_notification.value.enabled
+      timeout = lookup(termination_notification.value, "timeout", "PT5M")
+    }
+  }
+
+  dynamic "winrm_listener" {
+    for_each = each.value.winrm_listener != null ? each.value.winrm_listener : []
+    content {
+      protocol        = winrm_listener.value.protocol
+      certificate_url = winrm_listener.value.certificate_url
+    }
+  }
+}
+
+module "os_calculator" {
+  source       = "cyber-scot/windows-virtual-machine-os-sku-calculator/azurerm"
+  for_each     = { for vm in var.windows_vms : vm.name => vm if try(vm.use_simple_image, null) == true }
+  vm_os_simple = each.value.vm_os_simple
+}
+
+module "os_calculator_with_plan" {
+  source       = "cyber-scot/windows-virtual-machine-os-sku-with-plan-calculator/azurerm"
+  for_each     = { for vm in var.windows_vms : vm.name => vm if try(vm.use_simple_image_with_plan, null) == true }
+  vm_os_simple = each.value.vm_os_simple
+}
+
+resource "azurerm_marketplace_agreement" "plan_acceptance_simple" {
+  for_each = { for vm in var.windows_vms : vm.name => vm if try(vm.use_simple_image_with_plan, null) == true && try(vm.accept_plan, null) == true && try(vm.use_custom_image, null) == false }
+
+  publisher = coalesce(each.value.vm_os_publisher, module.os_calculator_with_plan[each.key].calculated_value_os_publisher)
+  offer     = coalesce(each.value.vm_os_offer, module.os_calculator_with_plan[each.key].calculated_value_os_offer)
+  plan      = coalesce(each.value.vm_os_sku, module.os_calculator_with_plan[each.key].calculated_value_os_sku)
+}
+
+resource "azurerm_marketplace_agreement" "plan_acceptance_custom" {
+  for_each = { for vm in var.windows_vms : vm.name => vm if try(vm.use_custom_image_with_plan, null) == true && try(vm.accept_plan, null) == true && try(vm.use_custom_image, null) == true }
+
+  publisher = lookup(each.value.plan, "publisher", null)
+  offer     = lookup(each.value.plan, "product", null)
+  plan      = lookup(each.value.plan, "name", null)
+}
+
+resource "azurerm_virtual_machine_extension" "windows_vm_inline_command" {
+  for_each   = { for vm in var.windows_vms : vm.name => vm if try(vm.run_vm_command.inline, null) != null }
+  depends_on = [azurerm_windows_virtual_machine.this]
+
+  name                       = each.value.run_vm_command.extension_name != null ? each.value.run_vm_command.extension_name : "run-command-${each.value.name}"
+  publisher                  = "Microsoft.CPlat.Core"
+  type                       = "RunCommandWindows"
+  type_handler_version       = "1.1"
+  auto_upgrade_minor_version = true
+
+  settings = jsonencode({
+    script = tolist([each.value.run_vm_command.inline])
+  })
+
+  tags               = var.tags
+  virtual_machine_id = azurerm_windows_virtual_machine.this[each.key].id
+
+  lifecycle {
+    ignore_changes = all
+  }
+}
+
+resource "azurerm_virtual_machine_extension" "windows_vm_file_command" {
+  for_each   = { for vm in var.windows_vms : vm.name => vm if try(vm.run_vm_command.script_file, null) != null }
+  depends_on = [azurerm_windows_virtual_machine.this]
+
+  name                       = each.value.run_vm_command.extension_name != null ? each.value.run_vm_command.extension_name : "run-command-file-${each.value.name}"
+  publisher                  = "Microsoft.CPlat.Core"
+  type                       = "RunCommandWindows"
+  type_handler_version       = "1.1"
+  auto_upgrade_minor_version = true
+
+  settings = jsonencode({
+    script = compact(tolist([each.value.run_vm_command.script_file]))
+  })
+
+  tags               = var.tags
+  virtual_machine_id = azurerm_windows_virtual_machine.this[each.key].id
+
+  lifecycle {
+    ignore_changes = all
+  }
+}
+
+resource "azurerm_virtual_machine_extension" "windows_vm_uri_command" {
+  for_each   = { for vm in var.windows_vms : vm.name => vm if try(vm.run_vm_command.script_uri, null) != null }
+  depends_on = [azurerm_windows_virtual_machine.this]
+
+  name                       = each.value.run_vm_command.extension_name != null ? each.value.run_vm_command.extension_name : "run-command-uri-${each.value.name}"
+  publisher                  = "Microsoft.CPlat.Core"
+  type                       = "RunCommandWindows"
+  type_handler_version       = "1.1"
+  auto_upgrade_minor_version = true
+
+  settings = jsonencode({
+    script = compact(tolist([each.value.run_vm_command.script_uri]))
+  })
+
+  tags               = var.tags
+  virtual_machine_id = azurerm_windows_virtual_machine.this[each.key].id
+
+  lifecycle {
+    ignore_changes = all
+  }
 }
 ```
-
-For a full example build, check out the [Libre DevOps Website](https://www.libredevops.org/quickstart/utils/terraform/using-lbdo-tf-modules-example.html)
-
-
 ## Requirements
 
 No requirements.
@@ -149,13 +363,14 @@ No requirements.
 | Name | Version |
 |------|---------|
 | <a name="provider_azurerm"></a> [azurerm](#provider\_azurerm) | n/a |
+| <a name="provider_random"></a> [random](#provider\_random) | n/a |
 
 ## Modules
 
 | Name | Source | Version |
 |------|--------|---------|
-| <a name="module_os_calculator"></a> [os\_calculator](#module\_os\_calculator) | registry.terraform.io/libre-devops/windows-os-sku-calculator/azurerm | n/a |
-| <a name="module_os_calculator_with_plan"></a> [os\_calculator\_with\_plan](#module\_os\_calculator\_with\_plan) | registry.terraform.io/libre-devops/windows-os-sku-with-plan-calculator/azurerm | n/a |
+| <a name="module_os_calculator"></a> [os\_calculator](#module\_os\_calculator) | cyber-scot/windows-virtual-machine-os-sku-calculator/azurerm | n/a |
+| <a name="module_os_calculator_with_plan"></a> [os\_calculator\_with\_plan](#module\_os\_calculator\_with\_plan) | cyber-scot/windows-virtual-machine-os-sku-with-plan-calculator/azurerm | n/a |
 
 ## Resources
 
@@ -167,66 +382,32 @@ No requirements.
 | [azurerm_network_interface.nic](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/network_interface) | resource |
 | [azurerm_network_interface_application_security_group_association.asg_association](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/network_interface_application_security_group_association) | resource |
 | [azurerm_public_ip.pip](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/public_ip) | resource |
-| [azurerm_windows_virtual_machine.windows_vm](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/windows_virtual_machine) | resource |
+| [azurerm_virtual_machine_extension.windows_vm_file_command](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/virtual_machine_extension) | resource |
+| [azurerm_virtual_machine_extension.windows_vm_inline_command](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/virtual_machine_extension) | resource |
+| [azurerm_virtual_machine_extension.windows_vm_uri_command](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/virtual_machine_extension) | resource |
+| [azurerm_windows_virtual_machine.this](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/windows_virtual_machine) | resource |
+| [random_integer.zone](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/integer) | resource |
 
 ## Inputs
 
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
-| <a name="input_admin_password"></a> [admin\_password](#input\_admin\_password) | The admin password to be used on the VMSS that will be deployed. The password must meet the complexity requirements of Azure. | `string` | `""` | no |
-| <a name="input_admin_username"></a> [admin\_username](#input\_admin\_username) | The admin username of the VM that will be deployed. | `string` | `"LibreDevOpsAdmin"` | no |
-| <a name="input_allocation_method"></a> [allocation\_method](#input\_allocation\_method) | Defines how an IP address is assigned. Options are Static or Dynamic. | `string` | `"Dynamic"` | no |
-| <a name="input_allow_extension_operations"></a> [allow\_extension\_operations](#input\_allow\_extension\_operations) | Whether extensions are allowed to execute on the VM | `bool` | `true` | no |
-| <a name="input_asg_name"></a> [asg\_name](#input\_asg\_name) | The name of the application security group to be made | `string` | n/a | yes |
-| <a name="input_availability_zone"></a> [availability\_zone](#input\_availability\_zone) | The availability zone for the VMs to be created to | `string` | `null` | no |
-| <a name="input_data_disk_size_gb"></a> [data\_disk\_size\_gb](#input\_data\_disk\_size\_gb) | Storage data disk size size. | `number` | `30` | no |
-| <a name="input_enable_accelerated_networking"></a> [enable\_accelerated\_networking](#input\_enable\_accelerated\_networking) | (Optional) Enable accelerated networking on Network interface. | `bool` | `false` | no |
-| <a name="input_enable_automatic_updates"></a> [enable\_automatic\_updates](#input\_enable\_automatic\_updates) | Should automatic updates be enabled? Defaults to false | `string` | `false` | no |
-| <a name="input_enable_encryption_at_host"></a> [enable\_encryption\_at\_host](#input\_enable\_encryption\_at\_host) | Whether host encryption is enabled | `bool` | `false` | no |
-| <a name="input_identity_ids"></a> [identity\_ids](#input\_identity\_ids) | Specifies a list of user managed identity ids to be assigned to the VM. | `list(string)` | `[]` | no |
-| <a name="input_identity_type"></a> [identity\_type](#input\_identity\_type) | The Managed Service Identity Type of this Virtual Machine. | `string` | `""` | no |
-| <a name="input_license_type"></a> [license\_type](#input\_license\_type) | Specifies the BYOL Type for this Virtual Machine. This is only applicable to Windows Virtual Machines. Possible values are Windows\_Client and Windows\_Server | `string` | `null` | no |
-| <a name="input_location"></a> [location](#input\_location) | The location for this resource to be put in | `string` | n/a | yes |
-| <a name="input_patch_mode"></a> [patch\_mode](#input\_patch\_mode) | The patching mode of the virtual machines being deployed, default is Manual | `string` | `"Manual"` | no |
-| <a name="input_pip_custom_dns_label"></a> [pip\_custom\_dns\_label](#input\_pip\_custom\_dns\_label) | If you are using a public IP and wish to assign a custom DNS label, set here, otherwise, the VM host name will be used | `any` | `null` | no |
-| <a name="input_pip_name"></a> [pip\_name](#input\_pip\_name) | If you are using a Public IP, set the name in this variable | `string` | `null` | no |
-| <a name="input_plan"></a> [plan](#input\_plan) | When a plan VM is used with a image not in the calculator, this will contain the variables used | `map(any)` | `{}` | no |
-| <a name="input_provision_vm_agent"></a> [provision\_vm\_agent](#input\_provision\_vm\_agent) | Whether the Azure agent is installed on this VM, default is true | `bool` | `true` | no |
-| <a name="input_public_ip_sku"></a> [public\_ip\_sku](#input\_public\_ip\_sku) | If you wish to assign a public IP directly to your nic, set this to Standard | `string` | `null` | no |
-| <a name="input_rg_name"></a> [rg\_name](#input\_rg\_name) | The name of the resource group, this module does not create a resource group, it is expecting the value of a resource group already exists | `string` | n/a | yes |
-| <a name="input_source_image_reference"></a> [source\_image\_reference](#input\_source\_image\_reference) | Whether the module should use the a custom image | `map(any)` | `{}` | no |
-| <a name="input_spot_instance"></a> [spot\_instance](#input\_spot\_instance) | Whether the VM is a spot instance or not | `bool` | `false` | no |
-| <a name="input_spot_instance_eviction_policy"></a> [spot\_instance\_eviction\_policy](#input\_spot\_instance\_eviction\_policy) | The eviction policy for a spot instance | `string` | `null` | no |
-| <a name="input_spot_instance_max_bid_price"></a> [spot\_instance\_max\_bid\_price](#input\_spot\_instance\_max\_bid\_price) | The max bid price for a spot instance | `string` | `null` | no |
-| <a name="input_static_private_ip"></a> [static\_private\_ip](#input\_static\_private\_ip) | If you are using a static IP, set it in this variable | `string` | `null` | no |
-| <a name="input_storage_account_type"></a> [storage\_account\_type](#input\_storage\_account\_type) | Defines the type of storage account to be created. Valid options are Standard\_LRS, Standard\_ZRS, Standard\_GRS, Standard\_RAGRS, Premium\_LRS. | `string` | `"Standard_LRS"` | no |
-| <a name="input_subnet_id"></a> [subnet\_id](#input\_subnet\_id) | The subnet ID for the NICs which are created with the VMs to be added to | `string` | n/a | yes |
-| <a name="input_tags"></a> [tags](#input\_tags) | A map of the tags to use on the resources that are deployed with this module. | `map(string)` | <pre>{<br>  "source": "terraform"<br>}</pre> | no |
-| <a name="input_timezone"></a> [timezone](#input\_timezone) | The timezone for your VM to be deployed with | `string` | `"GMT Standard Time"` | no |
-| <a name="input_use_simple_image"></a> [use\_simple\_image](#input\_use\_simple\_image) | Whether the module should use the simple OS calculator module, default is true | `bool` | `true` | no |
-| <a name="input_use_simple_image_with_plan"></a> [use\_simple\_image\_with\_plan](#input\_use\_simple\_image\_with\_plan) | If you are using the Windows OS Sku Calculator with plan, set this to true. Default is false | `bool` | `false` | no |
-| <a name="input_vm_amount"></a> [vm\_amount](#input\_vm\_amount) | A number, with the amount of VMs which is expected to be created | `number` | n/a | yes |
-| <a name="input_vm_hostname"></a> [vm\_hostname](#input\_vm\_hostname) | The hostname of the vm | `string` | n/a | yes |
-| <a name="input_vm_os_disk_size_gb"></a> [vm\_os\_disk\_size\_gb](#input\_vm\_os\_disk\_size\_gb) | The size of the OS Disk in GiB | `string` | `"127"` | no |
-| <a name="input_vm_os_id"></a> [vm\_os\_id](#input\_vm\_os\_id) | The resource ID of the image that you want to deploy if you are using a custom image.Note, need to provide is\_windows\_image = true for windows custom images. | `string` | `""` | no |
-| <a name="input_vm_os_offer"></a> [vm\_os\_offer](#input\_vm\_os\_offer) | The name of the offer of the image that you want to deploy. This is ignored when vm\_os\_id or vm\_os\_simple are provided. | `string` | `""` | no |
-| <a name="input_vm_os_publisher"></a> [vm\_os\_publisher](#input\_vm\_os\_publisher) | The name of the publisher of the image that you want to deploy. This is ignored when vm\_os\_id or vm\_os\_simple are provided. | `string` | `""` | no |
-| <a name="input_vm_os_simple"></a> [vm\_os\_simple](#input\_vm\_os\_simple) | Specify WindowsServer, to get the latest image version of the specified os.  Do not provide this value if a custom value is used for vm\_os\_publisher, vm\_os\_offer, and vm\_os\_sku. | `string` | `""` | no |
-| <a name="input_vm_os_sku"></a> [vm\_os\_sku](#input\_vm\_os\_sku) | The sku of the image that you want to deploy. This is ignored when vm\_os\_id or vm\_os\_simple are provided. | `string` | `""` | no |
-| <a name="input_vm_os_version"></a> [vm\_os\_version](#input\_vm\_os\_version) | The version of the image that you want to deploy. This is ignored when vm\_os\_id or vm\_os\_simple are provided. | `string` | `"latest"` | no |
-| <a name="input_vm_size"></a> [vm\_size](#input\_vm\_size) | Specifies the size of the virtual machine. | `string` | `"Standard_B2ms"` | no |
+| <a name="input_location"></a> [location](#input\_location) | The region to place the resources | `string` | n/a | yes |
+| <a name="input_rg_name"></a> [rg\_name](#input\_rg\_name) | The resource group name to place the scale sets in | `string` | n/a | yes |
+| <a name="input_tags"></a> [tags](#input\_tags) | Tags to be applied to the resource | `map(string)` | n/a | yes |
+| <a name="input_windows_vms"></a> [windows\_vms](#input\_windows\_vms) | List of VM configurations. | <pre>list(object({<br>    accept_plan = optional(bool, false)<br>    additional_unattend_content = optional(list(object({<br>      content = string<br>      setting = string<br>    })))<br>    admin_password                       = string<br>    admin_username                       = string<br>    allocation_method                    = optional(string, "Static")<br>    allow_extension_operations           = optional(bool, true)<br>    asg_id                               = optional(string, null)<br>    asg_name                             = optional(string, null)<br>    availability_set_id                  = optional(string)<br>    availability_zone                    = optional(string, "random")<br>    boot_diagnostics_storage_account_uri = optional(string, null)<br>    secrets = optional(list(object({<br>      key_vault_id = string<br>      certificates = list(object({<br>        store = string<br>        url   = string<br>      }))<br>    })))<br>    computer_name                 = optional(string)<br>    create_asg                    = optional(bool, true)<br>    custom_data                   = optional(string)<br>    custom_source_image_id        = optional(string, null)<br>    enable_accelerated_networking = optional(bool, false)<br>    enable_automatic_updates      = optional(bool, true)<br>    enable_encryption_at_host     = optional(bool, false)<br>    identity_ids                  = optional(list(string))<br>    identity_type                 = optional(string)<br>    license_type                  = optional(string)<br>    name                          = string<br>    nic_ipconfig_name             = optional(string)<br>    nic_name                      = optional(string, null)<br>    os_disk = object({<br>      caching      = optional(string, "ReadWrite")<br>      os_disk_type = optional(string, "StandardSSD_LRS")<br>      diff_disk_settings = optional(object({<br>        option = string<br>      }))<br>      disk_encryption_set_id           = optional(string, null)<br>      disk_size_gb                     = optional(number, "127")<br>      name                             = optional(string, null)<br>      secure_vm_disk_encryption_set_id = optional(string, null)<br>      security_encryption_type         = optional(string, null)<br>      write_accelerator_enabled        = optional(bool, false)<br>    })<br>    patch_mode                    = optional(string, "AutomaticByOS")<br>    pip_custom_dns_label          = optional(string)<br>    pip_name                      = optional(string)<br>    provision_vm_agent            = optional(bool, true)<br>    public_ip_sku                 = optional(string, null)<br>    source_image_reference        = optional(map(string))<br>    spot_instance                 = optional(bool, false)<br>    spot_instance_eviction_policy = optional(string)<br>    spot_instance_max_bid_price   = optional(string)<br>    static_private_ip             = optional(string)<br>    subnet_id                     = string<br>    termination_notification = optional(object({<br>      enabled = bool<br>      timeout = optional(string)<br>    }))<br>    run_vm_command = optional(object({<br>      extension_name = optional(string)<br>      inline         = optional(string)<br>      script_file    = optional(string)<br>      script_uri     = optional(string)<br>    }))<br>    timezone                     = optional(string)<br>    ultra_ssd_enabled            = optional(bool, false)<br>    use_custom_image             = optional(bool, false)<br>    use_custom_image_with_plan   = optional(bool, false)<br>    use_simple_image             = optional(bool, true)<br>    use_simple_image_with_plan   = optional(bool, false)<br>    user_data                    = optional(string, null)<br>    virtual_machine_scale_set_id = optional(string, null)<br>    vm_os_id                     = optional(string, "")<br>    vm_os_offer                  = optional(string)<br>    vm_os_publisher              = optional(string)<br>    vm_os_simple                 = optional(string)<br>    vm_os_sku                    = optional(string)<br>    vm_os_version                = optional(string)<br>    vm_size                      = string<br>    vtpm_enabled                 = optional(bool, false)<br>    winrm_listener = optional(list(object({<br>      protocol        = string<br>      certificate_url = optional(string)<br>    })))<br>  }))</pre> | `[]` | no |
 
 ## Outputs
 
 | Name | Description |
 |------|-------------|
-| <a name="output_asg_id"></a> [asg\_id](#output\_asg\_id) | The id of the ASG |
-| <a name="output_asg_name"></a> [asg\_name](#output\_asg\_name) | The name of the ASG |
-| <a name="output_nic_id"></a> [nic\_id](#output\_nic\_id) | The ID of the nics |
-| <a name="output_nic_ip_config_name"></a> [nic\_ip\_config\_name](#output\_nic\_ip\_config\_name) | The name of the IP Configurations |
-| <a name="output_nic_ip_private_ip"></a> [nic\_ip\_private\_ip](#output\_nic\_ip\_private\_ip) | The private IP assigned to the NIC |
-| <a name="output_vm_amount"></a> [vm\_amount](#output\_vm\_amount) | The amount of VMs passed to the vm\_amount variable |
-| <a name="output_vm_identity"></a> [vm\_identity](#output\_vm\_identity) | map with key `Virtual Machine Id`, value `list of identity` created for the Virtual Machine. |
-| <a name="output_vm_ids"></a> [vm\_ids](#output\_vm\_ids) | Virtual machine ids created. |
-| <a name="output_vm_name"></a> [vm\_name](#output\_vm\_name) | n/a |
-| <a name="output_vm_zones"></a> [vm\_zones](#output\_vm\_zones) | map with key `Virtual Machine Id`, value `list of the Availability Zone` which the Virtual Machine should be allocated in. |
+| <a name="output_asg_ids"></a> [asg\_ids](#output\_asg\_ids) | List of ASG IDs. |
+| <a name="output_asg_names"></a> [asg\_names](#output\_asg\_names) | List of ASG Names. |
+| <a name="output_managed_identities"></a> [managed\_identities](#output\_managed\_identities) | Managed identities of the VMs |
+| <a name="output_nic_private_ipv4_addresses"></a> [nic\_private\_ipv4\_addresses](#output\_nic\_private\_ipv4\_addresses) | List of NIC Private IPv4 Addresses. |
+| <a name="output_public_ip_ids"></a> [public\_ip\_ids](#output\_public\_ip\_ids) | List of Public IP IDs. |
+| <a name="output_public_ip_names"></a> [public\_ip\_names](#output\_public\_ip\_names) | List of Public IP Names. |
+| <a name="output_public_ip_values"></a> [public\_ip\_values](#output\_public\_ip\_values) | List of Public IP Addresses. |
+| <a name="output_vm_details_map"></a> [vm\_details\_map](#output\_vm\_details\_map) | A map where the key is the VM name and the value is another map containing the VM ID and private IP address. |
+| <a name="output_vm_ids"></a> [vm\_ids](#output\_vm\_ids) | List of VM IDs. |
+| <a name="output_vm_names"></a> [vm\_names](#output\_vm\_names) | List of VM Names. |
