@@ -97,6 +97,7 @@ module "bastion" {
   create_bastion_nsg                 = true
   create_bastion_nsg_rules           = true
   create_bastion_subnet              = false
+  external_subnet_id                 = module.network.subnets_ids["AzureBastionSubnet"]
   bastion_subnet_target_vnet_name    = module.network.vnet_name
   bastion_subnet_target_vnet_rg_name = module.network.vnet_rg_name
   bastion_subnet_range               = "10.0.1.0/27"
