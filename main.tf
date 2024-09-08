@@ -17,10 +17,10 @@ resource "azurerm_public_ip" "pip" {
 resource "azurerm_network_interface" "nic" {
   for_each = { for vm in var.windows_vms : vm.name => vm }
 
-  name                        = each.value.nic_name != null ? each.value.nic_name : "nic-${each.value.name}"
-  location                    = var.location
-  resource_group_name         = var.rg_name
-  accelerated_network_enabled = each.value.enable_accelerated_networking
+  name                           = each.value.nic_name != null ? each.value.nic_name : "nic-${each.value.name}"
+  location                       = var.location
+  resource_group_name            = var.rg_name
+  accelerated_networking_enabled = each.value.enable_accelerated_networking
 
   ip_configuration {
     name                          = each.value.nic_ipconfig_name != null ? each.value.nic_ipconfig_name : "nic-ipcon-${each.value.name}"
