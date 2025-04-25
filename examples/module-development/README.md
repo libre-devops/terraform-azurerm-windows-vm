@@ -217,10 +217,24 @@ module "windows_vm" {
       os_disk = {
         disk_size_gb = 128
       }
-      run_vm_command = {
-        inline = "try { Install-WindowsFeature -Name Web-Server -IncludeManagementTools } catch { Write-Error 'Failed to install IIS: $_'; exit 1 }"
-      }
     },
+  ]
+}
+
+module "run_vm_command" {
+  source = "libre-devops/run-vm-command/azurerm"
+
+  location = module.rg.rg_location
+  tags     = module.rg.rg_tags
+  os_type  = "Windows"
+  vm_id    = module.windows_vm.vm_ids[0]
+
+  commands = [
+    {
+      run_as_user     = local.admin_username
+      run_as_password = module.key_vault_secrets.random_passwords["${local.admin_username}-password"]
+      inline          = "try { Install-WindowsFeature -Name Web-Server -IncludeManagementTools } catch { Write-Error 'Failed to install IIS: $_'; exit 1 }"
+    }
   ]
 }
 ```
@@ -247,6 +261,7 @@ No requirements.
 | <a name="module_nsg"></a> [nsg](#module\_nsg) | libre-devops/nsg/azurerm | n/a |
 | <a name="module_rg"></a> [rg](#module\_rg) | libre-devops/rg/azurerm | n/a |
 | <a name="module_role_assignments"></a> [role\_assignments](#module\_role\_assignments) | github.com/libre-devops/terraform-azurerm-role-assignment | n/a |
+| <a name="module_run_vm_command"></a> [run\_vm\_command](#module\_run\_vm\_command) | libre-devops/run-vm-command/azurerm | n/a |
 | <a name="module_shared_vars"></a> [shared\_vars](#module\_shared\_vars) | libre-devops/shared-vars/azurerm | n/a |
 | <a name="module_subnet_calculator"></a> [subnet\_calculator](#module\_subnet\_calculator) | libre-devops/subnet-calculator/null | n/a |
 | <a name="module_user_assigned_managed_identity"></a> [user\_assigned\_managed\_identity](#module\_user\_assigned\_managed\_identity) | libre-devops/user-assigned-managed-identity/azurerm | n/a |
