@@ -287,68 +287,80 @@ resource "azurerm_marketplace_agreement" "plan_acceptance_custom" {
   plan      = lookup(each.value.plan, "name", null)
 }
 
-resource "azurerm_virtual_machine_extension" "windows_vm_inline_command" {
-  for_each   = { for vm in var.windows_vms : vm.name => vm if try(vm.run_vm_command.inline, null) != null }
-  depends_on = [azurerm_windows_virtual_machine.this]
+################################################################################
+# Modern Run Command (azurerm_virtual_machine_run_command)                     #
+################################################################################
+resource "azurerm_virtual_machine_run_command" "windows_vm" {
+  for_each = {
+    for vm in var.windows_vms :
+    vm.name => vm
+    /*
+      Create the resource only when the user has supplied
+      *one* of inline | script_file | script_uri
+    */
+    if vm.run_vm_command != null && (
+      try(vm.run_vm_command.inline, null) != null ||
+      try(vm.run_vm_command.script_file, null) != null ||
+      try(vm.run_vm_command.script_uri, null) != null
+    )
+  }
 
-  name                       = each.value.run_vm_command.extension_name != null ? each.value.run_vm_command.extension_name : "run-command-${each.value.name}"
-  publisher                  = "Microsoft.CPlat.Core"
-  type                       = "RunCommandWindows"
-  type_handler_version       = "1.1"
-  auto_upgrade_minor_version = true
-
-  settings = jsonencode({
-    script = tolist([each.value.run_vm_command.inline])
-  })
-
-  tags               = var.tags
+  # ────────────────────────────────────────────────────────
+  # Required top-level arguments
+  # ────────────────────────────────────────────────────────
+  name = coalesce(
+    try(each.value.run_vm_command.extension_name, null),
+    "run-cmd-${each.value.name}"
+  )
+  location           = var.location
   virtual_machine_id = azurerm_windows_virtual_machine.this[each.key].id
+  run_as_user        = each.value.admin_username
+  tags               = var.tags
 
+  # ────────────────────────────────────────────────────────
+  # Source block – exactly one form per VM
+  # ────────────────────────────────────────────────────────
+  dynamic "source" {
+    # ── case 1: inline string ─────────────────────────────
+    for_each = try(each.value.run_vm_command.inline, null) != null ? [1] : []
+    content {
+      script = each.value.run_vm_command.inline
+    }
+  }
+
+  dynamic "source" {
+    # ── case 2: local script file ─────────────────────────
+    for_each = try(each.value.run_vm_command.script_file, null) != null ? [1] : []
+    content {
+      # Read the file content at plan time
+      script = file(each.value.run_vm_command.script_file)
+    }
+  }
+
+  dynamic "source" {
+    # ── case 3: remote URI ────────────────────────────────
+    for_each = try(each.value.run_vm_command.script_uri, null) != null ? [1] : []
+    content {
+      script_uri = each.value.run_vm_command.script_uri
+    }
+  }
+
+  # ────────────────────────────────────────────────────────
+  # Preconditions – enforce “one and only one” source type
+  # ────────────────────────────────────────────────────────
   lifecycle {
-    ignore_changes = all
+    precondition {
+      condition = (
+        length(compact([
+          try(each.value.run_vm_command.inline, null),
+          try(each.value.run_vm_command.script_file, null),
+          try(each.value.run_vm_command.script_uri, null)
+        ])) == 1
+      )
+      error_message = "run_vm_command for VM '${each.key}' must set exactly ONE of inline, script_file, or script_uri."
+    }
+
+    ignore_changes = [tags]
   }
 }
 
-resource "azurerm_virtual_machine_extension" "windows_vm_file_command" {
-  for_each   = { for vm in var.windows_vms : vm.name => vm if try(vm.run_vm_command.script_file, null) != null }
-  depends_on = [azurerm_windows_virtual_machine.this]
-
-  name                       = each.value.run_vm_command.extension_name != null ? each.value.run_vm_command.extension_name : "run-command-file-${each.value.name}"
-  publisher                  = "Microsoft.CPlat.Core"
-  type                       = "RunCommandWindows"
-  type_handler_version       = "1.1"
-  auto_upgrade_minor_version = true
-
-  settings = jsonencode({
-    script = compact(tolist([each.value.run_vm_command.script_file]))
-  })
-
-  tags               = var.tags
-  virtual_machine_id = azurerm_windows_virtual_machine.this[each.key].id
-
-  lifecycle {
-    ignore_changes = all
-  }
-}
-
-resource "azurerm_virtual_machine_extension" "windows_vm_uri_command" {
-  for_each   = { for vm in var.windows_vms : vm.name => vm if try(vm.run_vm_command.script_uri, null) != null }
-  depends_on = [azurerm_windows_virtual_machine.this]
-
-  name                       = each.value.run_vm_command.extension_name != null ? each.value.run_vm_command.extension_name : "run-command-uri-${each.value.name}"
-  publisher                  = "Microsoft.CPlat.Core"
-  type                       = "RunCommandWindows"
-  type_handler_version       = "1.1"
-  auto_upgrade_minor_version = true
-
-  settings = jsonencode({
-    script = compact(tolist([each.value.run_vm_command.script_uri]))
-  })
-
-  tags               = var.tags
-  virtual_machine_id = azurerm_windows_virtual_machine.this[each.key].id
-
-  lifecycle {
-    ignore_changes = all
-  }
-}

@@ -1,3 +1,24 @@
+locals {
+  rg_name                     = "rg-${var.short}-${var.loc}-${var.env}-01"
+  vnet_name                   = "vnet-${var.short}-${var.loc}-${var.env}-01"
+  vm_subnet_name              = "VMsubnet"
+  bastion_name                = "bst-${var.short}-${var.loc}-${var.env}-01"
+  bastion_subnet_name         = "AzureBastionSubnet"
+  nsg_name                    = "nsg-${var.short}-${var.loc}-${var.env}-01"
+  admin_username              = "Local${title(var.short)}${title(var.env)}Admin"
+  user_assigned_identity_name = "uid-${var.short}-${var.loc}-${var.env}-01"
+  key_vault_name              = "kv-${var.short}-${var.loc}-${var.env}-01"
+  vm_name                     = "vm-${var.short}-${var.loc}-${var.env}-01"
+}
+
+module "rg" {
+  source = "libre-devops/rg/azurerm"
+
+  rg_name  = local.rg_name
+  location = local.location
+  tags     = local.tags
+}
+
 module "shared_vars" {
   source = "libre-devops/shared-vars/azurerm"
 }
@@ -10,37 +31,20 @@ locals {
   }
 }
 
-#
-#module "subnet_calculator" {
-#  source = "libre-devops/subnet-calculator/null"
-#
-#  base_cidr    = local.lookup_cidr[var.short][var.env][0]
-#  subnet_sizes = [24] # Automatic naming as subnet1, subnet2, subnet3
-#}
-#
-
 module "subnet_calculator" {
   source = "libre-devops/subnet-calculator/null"
 
   base_cidr = local.lookup_cidr[var.short][var.env][0]
   subnets = {
-    "AzureBastionSubnet" = {
+    (local.vm_subnet_name) = {
       mask_size = 26
       netnum    = 0
     }
-    "subnet1" = {
+    (local.bastion_subnet_name) = {
       mask_size = 26
       netnum    = 1
     }
   }
-}
-
-module "rg" {
-  source = "libre-devops/rg/azurerm"
-
-  rg_name  = "rg-${var.short}-${var.loc}-${var.env}-01"
-  location = local.location
-  tags     = local.tags
 }
 
 module "network" {
@@ -50,17 +54,40 @@ module "network" {
   location = module.rg.rg_location
   tags     = module.rg.rg_tags
 
-  vnet_name          = "vnet-${var.short}-${var.loc}-${var.env}-01"
+  vnet_name          = local.vnet_name
   vnet_location      = module.rg.rg_location
   vnet_address_space = [module.subnet_calculator.base_cidr]
 
   subnets = {
     for i, name in module.subnet_calculator.subnet_names :
     name => {
-      address_prefixes = toset([module.subnet_calculator.subnet_ranges[i]])
+      address_prefixes  = toset([module.subnet_calculator.subnet_ranges[i]])
+      service_endpoints = name == local.vm_subnet_name ? ["Microsoft.KeyVault"] : []
+
+      # Only assign delegation to subnet3
+      delegation = []
     }
   }
 }
+
+module "bastion" {
+  source = "libre-devops/bastion/azurerm"
+
+  count = var.deploy_bastion == true ? 1 : 0
+
+  rg_name  = module.rg.rg_name
+  location = module.rg.rg_location
+  tags     = module.rg.rg_tags
+
+  bastion_host_name        = local.bastion_name
+  bastion_sku              = "Basic"
+  virtual_network_id       = module.network.vnet_id
+  create_bastion_nsg       = true
+  create_bastion_nsg_rules = true
+  create_bastion_subnet    = false
+  external_subnet_id       = module.network.subnets_ids[local.bastion_subnet_name]
+}
+
 
 module "nsg" {
   source = "libre-devops/nsg/azurerm"
@@ -69,9 +96,9 @@ module "nsg" {
   location = module.rg.rg_location
   tags     = module.rg.rg_tags
 
-  nsg_name              = "nsg-${var.short}-${var.loc}-${var.env}-01"
+  nsg_name              = local.nsg_name
   associate_with_subnet = true
-  subnet_id             = element(values(module.network.subnets_ids), 1)
+  subnet_ids            = { for k, v in module.network.subnets_ids : k => v if k != "AzureBastionSubnet" }
   custom_nsg_rules = {
     "AllowVnetInbound" = {
       priority                   = 100
@@ -83,35 +110,93 @@ module "nsg" {
       source_address_prefix      = "VirtualNetwork"
       destination_address_prefix = "VirtualNetwork"
     }
+    "AllowClientInbound" = {
+      priority                   = 101
+      direction                  = "Inbound"
+      access                     = "Allow"
+      protocol                   = "Tcp"
+      source_port_range          = "*"
+      destination_port_range     = "*"
+      source_address_prefix      = chomp(data.http.user_ip.response_body)
+      destination_address_prefix = "VirtualNetwork"
+    }
   }
 }
 
-module "bastion" {
-  source = "libre-devops/bastion/azurerm"
+module "user_assigned_managed_identity" {
+  source = "libre-devops/user-assigned-managed-identity/azurerm"
 
   rg_name  = module.rg.rg_name
   location = module.rg.rg_location
   tags     = module.rg.rg_tags
 
-  bastion_host_name                  = "bst-${var.short}-${var.loc}-${var.env}-01"
-  create_bastion_nsg                 = true
-  create_bastion_nsg_rules           = true
-  create_bastion_subnet              = false
-  external_subnet_id                 = module.network.subnets_ids["AzureBastionSubnet"]
-  bastion_subnet_target_vnet_name    = module.network.vnet_name
-  bastion_subnet_target_vnet_rg_name = module.network.vnet_rg_name
-  bastion_subnet_range               = "10.0.1.0/27"
+  user_assigned_managed_identities = [
+    {
+      name = local.user_assigned_identity_name
+    }
+  ]
 }
 
-resource "azurerm_application_security_group" "server_asg" {
-  resource_group_name = module.rg.rg_name
-  location            = module.rg.rg_location
-  tags                = module.rg.rg_tags
+module "key_vault" {
+  source = "github.com/libre-devops/terraform-azurerm-keyvault"
 
-  name = "asg-${var.short}-${var.loc}-${var.env}-01"
+  key_vaults = [
+    {
+      name                            = local.key_vault_name
+      rg_name                         = module.rg.rg_name
+      location                        = module.rg.rg_location
+      tags                            = module.rg.rg_tags
+      enabled_for_deployment          = true
+      enabled_for_disk_encryption     = true
+      enabled_for_template_deployment = true
+      enable_rbac_authorization       = true
+      purge_protection_enabled        = false
+      public_network_access_enabled   = true
+      network_acls = {
+        default_action             = "Deny"
+        bypass                     = "AzureServices"
+        ip_rules                   = [chomp(data.http.user_ip.response_body)]
+        virtual_network_subnet_ids = [module.network.subnets_ids[local.vm_subnet_name]]
+      }
+    }
+  ]
 }
 
-module "windows_server" {
+module "role_assignments" {
+  source = "github.com/libre-devops/terraform-azurerm-role-assignment"
+
+  role_assignments = [
+    {
+      principal_ids = [data.azurerm_client_config.current.object_id]
+      role_names    = ["Key Vault Administrator"]
+      scope         = module.rg.rg_id
+      set_condition = true
+    },
+    {
+      principal_ids = [module.user_assigned_managed_identity.managed_identity_principal_ids[local.user_assigned_identity_name]]
+      role_names    = ["Key Vault Administrator"]
+      scope         = module.rg.rg_id
+      set_condition = true
+    }
+  ]
+}
+
+module "key_vault_secrets" {
+  source = "github.com/libre-devops/terraform-azurerm-key-vault-secrets"
+
+  key_vault_id = module.key_vault.key_vault_ids[0]
+
+  key_vault_secrets = [
+    {
+      secret_name              = "${local.admin_username}-password"
+      generate_random_password = true
+      content_type             = "text/plain"
+      tags                     = module.rg.rg_tags
+    },
+  ]
+}
+
+module "windows_vm" {
   source = "../../"
 
   rg_name  = module.rg.rg_name
@@ -120,36 +205,19 @@ module "windows_server" {
 
   windows_vms = [
     {
-      name           = "web-${var.short}-${var.loc}-${var.env}-01"
-      subnet_id      = module.network.subnets_ids["subnet1"]
-      create_asg     = false
-      asg_id         = azurerm_application_security_group.server_asg.id
-      admin_username = "Local${title(var.short)}${title(var.env)}Admin"
-      admin_password = data.azurerm_key_vault_secret.admin_pwd.value
+      name           = local.vm_name
+      subnet_id      = module.network.subnets_ids[local.vm_subnet_name]
+      create_asg     = true
+      admin_username = local.admin_username
+      admin_password = module.key_vault_secrets.random_passwords["${local.admin_username}-password"]
       vm_size        = "Standard_B2ms"
       timezone       = "UTC"
-      vm_os_simple   = "WindowsServer2022AzureEditionGen2"
+      vm_os_simple   = "WindowsServer2025Gen2"
       os_disk = {
         disk_size_gb = 128
       }
       run_vm_command = {
         inline = "try { Install-WindowsFeature -Name Web-Server -IncludeManagementTools } catch { Write-Error 'Failed to install IIS: $_'; exit 1 }"
-      }
-    },
-    {
-      name           = "app-${var.short}-${var.loc}-${var.env}-01"
-      subnet_id      = module.network.subnets_ids["subnet1"]
-      create_asg     = true
-      admin_username = "Local${title(var.short)}${title(var.env)}Admin"
-      admin_password = data.azurerm_key_vault_secret.admin_pwd.value
-      vm_size        = "Standard_B2ms"
-      timezone       = "UTC"
-      vm_os_simple   = "WindowsServer2022AzureEditionGen2"
-      os_disk = {
-        disk_size_gb = 128
-      }
-      run_vm_command = {
-        inline = "try { Install-WindowsFeature -Name FS-FileServer -IncludeManagementTools } catch { Write-Error 'Failed to install File Services: $_'; exit 1 }"
       }
     },
   ]

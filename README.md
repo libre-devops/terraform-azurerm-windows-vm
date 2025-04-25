@@ -288,71 +288,83 @@ resource "azurerm_marketplace_agreement" "plan_acceptance_custom" {
   plan      = lookup(each.value.plan, "name", null)
 }
 
-resource "azurerm_virtual_machine_extension" "windows_vm_inline_command" {
-  for_each   = { for vm in var.windows_vms : vm.name => vm if try(vm.run_vm_command.inline, null) != null }
-  depends_on = [azurerm_windows_virtual_machine.this]
+################################################################################
+# Modern Run Command (azurerm_virtual_machine_run_command)                     #
+################################################################################
+resource "azurerm_virtual_machine_run_command" "windows_vm" {
+  for_each = {
+    for vm in var.windows_vms :
+    vm.name => vm
+    /*
+      Create the resource only when the user has supplied
+      *one* of inline | script_file | script_uri
+    */
+    if vm.run_vm_command != null && (
+      try(vm.run_vm_command.inline, null) != null ||
+      try(vm.run_vm_command.script_file, null) != null ||
+      try(vm.run_vm_command.script_uri, null) != null
+    )
+  }
 
-  name                       = each.value.run_vm_command.extension_name != null ? each.value.run_vm_command.extension_name : "run-command-${each.value.name}"
-  publisher                  = "Microsoft.CPlat.Core"
-  type                       = "RunCommandWindows"
-  type_handler_version       = "1.1"
-  auto_upgrade_minor_version = true
-
-  settings = jsonencode({
-    script = tolist([each.value.run_vm_command.inline])
-  })
-
-  tags               = var.tags
+  # ────────────────────────────────────────────────────────
+  # Required top-level arguments
+  # ────────────────────────────────────────────────────────
+  name = coalesce(
+    try(each.value.run_vm_command.extension_name, null),
+    "run-cmd-${each.value.name}"
+  )
+  location           = var.location
   virtual_machine_id = azurerm_windows_virtual_machine.this[each.key].id
+  run_as_user        = each.value.admin_username
+  tags               = var.tags
 
+  # ────────────────────────────────────────────────────────
+  # Source block – exactly one form per VM
+  # ────────────────────────────────────────────────────────
+  dynamic "source" {
+    # ── case 1: inline string ─────────────────────────────
+    for_each = try(each.value.run_vm_command.inline, null) != null ? [1] : []
+    content {
+      script = each.value.run_vm_command.inline
+    }
+  }
+
+  dynamic "source" {
+    # ── case 2: local script file ─────────────────────────
+    for_each = try(each.value.run_vm_command.script_file, null) != null ? [1] : []
+    content {
+      # Read the file content at plan time
+      script = file(each.value.run_vm_command.script_file)
+    }
+  }
+
+  dynamic "source" {
+    # ── case 3: remote URI ────────────────────────────────
+    for_each = try(each.value.run_vm_command.script_uri, null) != null ? [1] : []
+    content {
+      script_uri = each.value.run_vm_command.script_uri
+    }
+  }
+
+  # ────────────────────────────────────────────────────────
+  # Preconditions – enforce “one and only one” source type
+  # ────────────────────────────────────────────────────────
   lifecycle {
-    ignore_changes = all
+    precondition {
+      condition = (
+        length(compact([
+          try(each.value.run_vm_command.inline, null),
+          try(each.value.run_vm_command.script_file, null),
+          try(each.value.run_vm_command.script_uri, null)
+        ])) == 1
+      )
+      error_message = "run_vm_command for VM '${each.key}' must set exactly ONE of inline, script_file, or script_uri."
+    }
+
+    ignore_changes = [tags]
   }
 }
 
-resource "azurerm_virtual_machine_extension" "windows_vm_file_command" {
-  for_each   = { for vm in var.windows_vms : vm.name => vm if try(vm.run_vm_command.script_file, null) != null }
-  depends_on = [azurerm_windows_virtual_machine.this]
-
-  name                       = each.value.run_vm_command.extension_name != null ? each.value.run_vm_command.extension_name : "run-command-file-${each.value.name}"
-  publisher                  = "Microsoft.CPlat.Core"
-  type                       = "RunCommandWindows"
-  type_handler_version       = "1.1"
-  auto_upgrade_minor_version = true
-
-  settings = jsonencode({
-    script = compact(tolist([each.value.run_vm_command.script_file]))
-  })
-
-  tags               = var.tags
-  virtual_machine_id = azurerm_windows_virtual_machine.this[each.key].id
-
-  lifecycle {
-    ignore_changes = all
-  }
-}
-
-resource "azurerm_virtual_machine_extension" "windows_vm_uri_command" {
-  for_each   = { for vm in var.windows_vms : vm.name => vm if try(vm.run_vm_command.script_uri, null) != null }
-  depends_on = [azurerm_windows_virtual_machine.this]
-
-  name                       = each.value.run_vm_command.extension_name != null ? each.value.run_vm_command.extension_name : "run-command-uri-${each.value.name}"
-  publisher                  = "Microsoft.CPlat.Core"
-  type                       = "RunCommandWindows"
-  type_handler_version       = "1.1"
-  auto_upgrade_minor_version = true
-
-  settings = jsonencode({
-    script = compact(tolist([each.value.run_vm_command.script_uri]))
-  })
-
-  tags               = var.tags
-  virtual_machine_id = azurerm_windows_virtual_machine.this[each.key].id
-
-  lifecycle {
-    ignore_changes = all
-  }
-}
 ```
 ## Requirements
 
@@ -382,9 +394,7 @@ No requirements.
 | [azurerm_network_interface.nic](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/network_interface) | resource |
 | [azurerm_network_interface_application_security_group_association.asg_association](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/network_interface_application_security_group_association) | resource |
 | [azurerm_public_ip.pip](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/public_ip) | resource |
-| [azurerm_virtual_machine_extension.windows_vm_file_command](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/virtual_machine_extension) | resource |
-| [azurerm_virtual_machine_extension.windows_vm_inline_command](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/virtual_machine_extension) | resource |
-| [azurerm_virtual_machine_extension.windows_vm_uri_command](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/virtual_machine_extension) | resource |
+| [azurerm_virtual_machine_run_command.windows_vm](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/virtual_machine_run_command) | resource |
 | [azurerm_windows_virtual_machine.this](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/windows_virtual_machine) | resource |
 | [random_integer.zone](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/integer) | resource |
 
@@ -395,7 +405,7 @@ No requirements.
 | <a name="input_location"></a> [location](#input\_location) | The region to place the resources | `string` | n/a | yes |
 | <a name="input_rg_name"></a> [rg\_name](#input\_rg\_name) | The resource group name to place the scale sets in | `string` | n/a | yes |
 | <a name="input_tags"></a> [tags](#input\_tags) | Tags to be applied to the resource | `map(string)` | n/a | yes |
-| <a name="input_windows_vms"></a> [windows\_vms](#input\_windows\_vms) | List of VM configurations. | <pre>list(object({<br>    accept_plan = optional(bool, false)<br>    additional_unattend_content = optional(list(object({<br>      content = string<br>      setting = string<br>    })))<br>    admin_password                       = string<br>    admin_username                       = string<br>    allocation_method                    = optional(string, "Static")<br>    allow_extension_operations           = optional(bool, true)<br>    asg_id                               = optional(string, null)<br>    asg_name                             = optional(string, null)<br>    availability_set_id                  = optional(string)<br>    availability_zone                    = optional(string, "random")<br>    boot_diagnostics_storage_account_uri = optional(string, null)<br>    secrets = optional(list(object({<br>      key_vault_id = string<br>      certificates = list(object({<br>        store = string<br>        url   = string<br>      }))<br>    })))<br>    computer_name                 = optional(string)<br>    create_asg                    = optional(bool, true)<br>    custom_data                   = optional(string)<br>    custom_source_image_id        = optional(string, null)<br>    enable_accelerated_networking = optional(bool, false)<br>    enable_automatic_updates      = optional(bool, true)<br>    enable_encryption_at_host     = optional(bool, false)<br>    identity_ids                  = optional(list(string))<br>    identity_type                 = optional(string)<br>    license_type                  = optional(string)<br>    name                          = string<br>    nic_ipconfig_name             = optional(string)<br>    nic_name                      = optional(string, null)<br>    os_disk = object({<br>      caching      = optional(string, "ReadWrite")<br>      os_disk_type = optional(string, "StandardSSD_LRS")<br>      diff_disk_settings = optional(object({<br>        option = string<br>      }))<br>      disk_encryption_set_id           = optional(string, null)<br>      disk_size_gb                     = optional(number, "127")<br>      name                             = optional(string, null)<br>      secure_vm_disk_encryption_set_id = optional(string, null)<br>      security_encryption_type         = optional(string, null)<br>      write_accelerator_enabled        = optional(bool, false)<br>    })<br>    patch_mode                    = optional(string, "AutomaticByOS")<br>    pip_custom_dns_label          = optional(string)<br>    pip_name                      = optional(string)<br>    provision_vm_agent            = optional(bool, true)<br>    public_ip_sku                 = optional(string, null)<br>    source_image_reference        = optional(map(string))<br>    spot_instance                 = optional(bool, false)<br>    spot_instance_eviction_policy = optional(string)<br>    spot_instance_max_bid_price   = optional(string)<br>    static_private_ip             = optional(string)<br>    subnet_id                     = string<br>    termination_notification = optional(object({<br>      enabled = bool<br>      timeout = optional(string)<br>    }))<br>    run_vm_command = optional(object({<br>      extension_name = optional(string)<br>      inline         = optional(string)<br>      script_file    = optional(string)<br>      script_uri     = optional(string)<br>    }))<br>    timezone                     = optional(string)<br>    ultra_ssd_enabled            = optional(bool, false)<br>    use_custom_image             = optional(bool, false)<br>    use_custom_image_with_plan   = optional(bool, false)<br>    use_simple_image             = optional(bool, true)<br>    use_simple_image_with_plan   = optional(bool, false)<br>    user_data                    = optional(string, null)<br>    virtual_machine_scale_set_id = optional(string, null)<br>    vm_os_id                     = optional(string, "")<br>    vm_os_offer                  = optional(string)<br>    vm_os_publisher              = optional(string)<br>    vm_os_simple                 = optional(string)<br>    vm_os_sku                    = optional(string)<br>    vm_os_version                = optional(string)<br>    vm_size                      = string<br>    vtpm_enabled                 = optional(bool, false)<br>    winrm_listener = optional(list(object({<br>      protocol        = string<br>      certificate_url = optional(string)<br>    })))<br>  }))</pre> | `[]` | no |
+| <a name="input_windows_vms"></a> [windows\_vms](#input\_windows\_vms) | List of VM configurations. | <pre>list(object({<br/>    accept_plan = optional(bool, false)<br/>    additional_unattend_content = optional(list(object({<br/>      content = string<br/>      setting = string<br/>    })))<br/>    admin_password                       = string<br/>    admin_username                       = string<br/>    allocation_method                    = optional(string, "Static")<br/>    allow_extension_operations           = optional(bool, true)<br/>    asg_id                               = optional(string, null)<br/>    asg_name                             = optional(string, null)<br/>    availability_set_id                  = optional(string)<br/>    availability_zone                    = optional(string, "random")<br/>    boot_diagnostics_storage_account_uri = optional(string, null)<br/>    secrets = optional(list(object({<br/>      key_vault_id = string<br/>      certificates = list(object({<br/>        store = string<br/>        url   = string<br/>      }))<br/>    })))<br/>    computer_name                 = optional(string)<br/>    create_asg                    = optional(bool, true)<br/>    custom_data                   = optional(string)<br/>    custom_source_image_id        = optional(string, null)<br/>    enable_accelerated_networking = optional(bool, false)<br/>    enable_automatic_updates      = optional(bool, true)<br/>    enable_encryption_at_host     = optional(bool, false)<br/>    identity_ids                  = optional(list(string))<br/>    identity_type                 = optional(string)<br/>    license_type                  = optional(string)<br/>    name                          = string<br/>    nic_ipconfig_name             = optional(string)<br/>    nic_name                      = optional(string, null)<br/>    os_disk = object({<br/>      caching      = optional(string, "ReadWrite")<br/>      os_disk_type = optional(string, "StandardSSD_LRS")<br/>      diff_disk_settings = optional(object({<br/>        option = string<br/>      }))<br/>      disk_encryption_set_id           = optional(string, null)<br/>      disk_size_gb                     = optional(number, "127")<br/>      name                             = optional(string, null)<br/>      secure_vm_disk_encryption_set_id = optional(string, null)<br/>      security_encryption_type         = optional(string, null)<br/>      write_accelerator_enabled        = optional(bool, false)<br/>    })<br/>    patch_mode                    = optional(string, "AutomaticByOS")<br/>    pip_custom_dns_label          = optional(string)<br/>    pip_name                      = optional(string)<br/>    provision_vm_agent            = optional(bool, true)<br/>    public_ip_sku                 = optional(string, null)<br/>    source_image_reference        = optional(map(string))<br/>    spot_instance                 = optional(bool, false)<br/>    spot_instance_eviction_policy = optional(string)<br/>    spot_instance_max_bid_price   = optional(string)<br/>    static_private_ip             = optional(string)<br/>    subnet_id                     = string<br/>    termination_notification = optional(object({<br/>      enabled = bool<br/>      timeout = optional(string)<br/>    }))<br/>    run_vm_command = optional(object({<br/>      extension_name = optional(string)<br/>      inline         = optional(string)<br/>      script_file    = optional(string)<br/>      script_uri     = optional(string)<br/>    }))<br/>    timezone                     = optional(string)<br/>    ultra_ssd_enabled            = optional(bool, false)<br/>    use_custom_image             = optional(bool, false)<br/>    use_custom_image_with_plan   = optional(bool, false)<br/>    use_simple_image             = optional(bool, true)<br/>    use_simple_image_with_plan   = optional(bool, false)<br/>    user_data                    = optional(string, null)<br/>    virtual_machine_scale_set_id = optional(string, null)<br/>    vm_os_id                     = optional(string, "")<br/>    vm_os_offer                  = optional(string)<br/>    vm_os_publisher              = optional(string)<br/>    vm_os_simple                 = optional(string)<br/>    vm_os_sku                    = optional(string)<br/>    vm_os_version                = optional(string)<br/>    vm_size                      = string<br/>    vtpm_enabled                 = optional(bool, false)<br/>    winrm_listener = optional(list(object({<br/>      protocol        = string<br/>      certificate_url = optional(string)<br/>    })))<br/>  }))</pre> | `[]` | no |
 
 ## Outputs
 
@@ -411,3 +421,9 @@ No requirements.
 | <a name="output_vm_details_map"></a> [vm\_details\_map](#output\_vm\_details\_map) | A map where the key is the VM name and the value is another map containing the VM ID and private IP address. |
 | <a name="output_vm_ids"></a> [vm\_ids](#output\_vm\_ids) | List of VM IDs. |
 | <a name="output_vm_names"></a> [vm\_names](#output\_vm\_names) | List of VM Names. |
+| <a name="output_vm_run_command_ids"></a> [vm\_run\_command\_ids](#output\_vm\_run\_command\_ids) | Resource IDs of azurerm\_virtual\_machine\_run\_command objects |
+| <a name="output_vm_run_command_instance_view"></a> [vm\_run\_command\_instance\_view](#output\_vm\_run\_command\_instance\_view) | Instance view of azurerm\_virtual\_machine\_run\_command objects |
+| <a name="output_vm_run_command_locations"></a> [vm\_run\_command\_locations](#output\_vm\_run\_command\_locations) | Azure region where each run-command resource is created |
+| <a name="output_vm_run_command_names"></a> [vm\_run\_command\_names](#output\_vm\_run\_command\_names) | Name property of each run-command resource |
+| <a name="output_vm_run_command_script_uris"></a> [vm\_run\_command\_script\_uris](#output\_vm\_run\_command\_script\_uris) | Script URIs for commands defined via script\_uri |
+| <a name="output_vm_run_command_scripts"></a> [vm\_run\_command\_scripts](#output\_vm\_run\_command\_scripts) | Inline script content for commands defined via inline or script\_file |
