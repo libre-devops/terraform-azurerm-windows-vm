@@ -1,7 +1,9 @@
 # tests/setup-unit-tests/main.tf
 terraform {
   required_providers {
-    random = { source = "hashicorp/random" }
+    random = {
+      source = "hashicorp/random"
+    }
   }
 }
 
@@ -13,6 +15,7 @@ resource "random_uuid" "subscription_id" {}
 
 
 locals {
+  vm_name   = "test-vm-${random_id.suffix.hex}"
   location  = "uksouth"
   rg_name   = "rg-test-${random_id.suffix.hex}"
   subnet_id = "/subscriptions/${random_uuid.subscription_id.result}/resourceGroups/${local.rg_name}/providers/Microsoft.Network/virtualNetworks/vnet-test/subnets/default"
