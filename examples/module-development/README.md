@@ -224,6 +224,7 @@ module "windows_vm" {
 module "run_vm_command" {
   source = "libre-devops/run-vm-command/azurerm"
 
+
   location = module.rg.rg_location
   tags     = module.rg.rg_tags
   os_type  = "Windows"
@@ -231,9 +232,7 @@ module "run_vm_command" {
 
   commands = [
     {
-      run_as_user     = local.admin_username
-      run_as_password = module.key_vault_secrets.random_passwords["${local.admin_username}-password"]
-      inline          = "try { Install-WindowsFeature -Name Web-Server -IncludeManagementTools } catch { Write-Error 'Failed to install IIS: $_'; exit 1 }"
+      inline = "try { Install-WindowsFeature -Name Web-Server -IncludeManagementTools } catch { Write-Error 'Failed to install IIS: $_'; exit 1 }"
     }
   ]
 }
