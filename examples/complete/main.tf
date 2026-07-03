@@ -10,8 +10,8 @@ locals {
   kv_name   = "kv-${var.short}-${var.loc}-${terraform.workspace}-002"
   law_name  = "log-${var.short}-${var.loc}-${terraform.workspace}-002"
   bas_name  = "bas-${var.short}-${var.loc}-${terraform.workspace}-002"
-  vm_app    = "vm-${var.short}-app-${var.loc}-${terraform.workspace}-002"
-  vm_worker = "vm-${var.short}-wkr-${var.loc}-${terraform.workspace}-002"
+  vm_app    = "vm-app-${var.short}-${var.loc}-${terraform.workspace}-002"
+  vm_worker = "vm-wkr-${var.short}-${var.loc}-${terraform.workspace}-002"
 }
 
 data "azurerm_client_config" "current" {}
