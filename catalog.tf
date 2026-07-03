@@ -2,7 +2,9 @@
 # external "SKU calculator" modules with one structured, in-module map. Every reference was verified
 # against the live marketplace (az vm image show) on 2026-07-03: all are Gen2 (hyperVGeneration V2)
 # and Trusted Launch capable, which matters because the module defaults secure boot and vTPM on.
-# None carry a marketplace plan. The AzureEdition entries are the hotpatching-capable ones.
+# None carry a marketplace plan. Hotpatching support follows the provider's sku allow-list: for
+# Server 2022 only the -hotpatch and -core AzureEdition skus qualify (not the plain azure-edition),
+# while 2025-datacenter-azure-edition qualifies directly.
 #
 # Discover the keys with the image_catalog_keys output; pick one with source_image_simple.
 # source_image_reference and source_image_id remain first-class for anything the catalog does not
@@ -35,6 +37,6 @@ locals {
     }
   }
 
-  # Catalog keys whose images support hotpatching (the azure-edition SKUs).
-  hotpatch_capable_keys = ["WindowsServer2022AzureEdition", "WindowsServer2025AzureEdition"]
+  # Catalog keys whose images support hotpatching, per the provider's sku allow-list.
+  hotpatch_capable_keys = ["WindowsServer2025AzureEdition"]
 }

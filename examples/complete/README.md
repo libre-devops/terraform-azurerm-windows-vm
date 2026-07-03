@@ -187,7 +187,10 @@ module "keyvault" {
     (local.kv_name) = {
       rbac_authorization_enabled = false
       purge_protection_enabled   = false
-      network_acls               = null
+      # The keyvault module firewalls vaults by default; this DISPOSABLE example vault opts out so
+      # the CI runner can reach the data plane. Allow is the expressible opt-out (an explicit null
+      # would be replaced by the secure default via optional()).
+      network_acls = { default_action = "Allow" }
       access_policies = [
         {
           object_id          = data.azurerm_client_config.current.object_id
@@ -248,7 +251,7 @@ module "windows_vm" {
       size                = "Standard_D2lds_v6"
       admin_username      = "azureadmin"
       admin_password      = random_password.admin.result
-      source_image_simple = "WindowsServer2022AzureEdition"
+      source_image_simple = "WindowsServer2025AzureEdition"
       subnet_id           = module.network.subnet_ids["snet-app-${local.vnet_name}"]
 
       patch_mode          = "AutomaticByPlatform"
@@ -283,9 +286,9 @@ module "windows_vm" {
       zone               = "1"
       spot               = { eviction_policy = "Deallocate" }
       license_type       = "Windows_Server"
+      # No explicit disk_size_gb: Windows Server images are 127 GB and Azure rejects smaller disks.
       os_disk = {
         storage_account_type = "Premium_LRS"
-        disk_size_gb         = 64
       }
       accelerated_networking_enabled = true
       tags                           = { Component = "worker" }
