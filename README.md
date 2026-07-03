@@ -1,430 +1,222 @@
+<!--
+  Keep the title and badges OUTSIDE the centered <div>: the Terraform Registry's markdown renderer
+  does not parse markdown inside an HTML block, so a # heading or [![badge]] in the div renders as
+  literal text on the registry. Only the logo (HTML) goes in the div.
+-->
+<div align="center">
+  <a href="https://libredevops.org">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://libredevops.org/assets/libre-devops-white.png">
+      <img alt="Libre DevOps" src="https://libredevops.org/assets/libre-devops-black.png" width="300">
+    </picture>
+  </a>
+</div>
+
+# Terraform Azure Windows VM
+
+Hardened Windows VMs by default: Trusted Launch, managed identity, a verified image catalog,
+hotpatching-aware, and VM Insights wired in one attribute.
+
+[![CI](https://github.com/libre-devops/terraform-azurerm-windows-vm/actions/workflows/ci.yml/badge.svg)](https://github.com/libre-devops/terraform-azurerm-windows-vm/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/libre-devops/terraform-azurerm-windows-vm?sort=semver&label=release)](https://github.com/libre-devops/terraform-azurerm-windows-vm/releases/latest)
+[![Terraform Registry](https://img.shields.io/badge/registry-libre--devops-7B42BC?logo=terraform&logoColor=white)](https://registry.terraform.io/namespaces/libre-devops)
+[![License](https://img.shields.io/github/license/libre-devops/terraform-azurerm-windows-vm)](./LICENSE)
+
+---
+
+## Overview
+
+VMs keyed by name, each with its own NIC, built so the SECURE shape is the ZERO-CONFIG shape:
+
+- **Trusted Launch** (secure boot + vTPM) on by default.
+- **A system-assigned managed identity** on every VM (what the monitor agent and RBAC grants use).
+- **Managed boot diagnostics**, **automatic OS updates**, and **platform patch assessment** on by
+  default.
+- **Public IPs are inputs only** (they live in the public-ip module), and attaching one is
+  plan-visible; the intended door is the bastion module's free Developer SKU.
+- **Passwords, handled properly**: admin_password is required (Windows has no key-only mode);
+  generate it with random_password and vault the retrievable copy write-only with the
+  keyvault-secret module, as the complete example shows. Computer names are capped at 15 characters
+  on Windows, so they derive from the VM name automatically.
+
+**The image catalog** replaces the old external "SKU calculator" modules: `source_image_simple`
+takes a friendly key (`Ubuntu2204`, `Ubuntu2404`, `Debian12`, `RHEL9`, `Sles15`, `Rocky9`; discover
+them via the `image_catalog_keys` output) resolving to marketplace references verified against the
+live platform, all Gen2 and Trusted Launch capable; Rocky carries its marketplace plan automatically. `source_image_reference` and `source_image_id` remain
+first-class, and marketplace `plan` images get their `azurerm_marketplace_agreement` created
+(deduplicated) when `accept_marketplace_agreement = true`.
+
+**VM Insights in one attribute**: `vm_insights = { log_analytics_workspace_id = ... }` installs the
+Azure Monitor agent on every VM (per-VM opt-out), creates the VM Insights data collection rule (or
+associates an existing `data_collection_rule_id`), and associates each VM, using the VMs' managed
+identities.
+
+**The rest of the surface**: flexible identity (SystemAssigned by default, UserAssigned, both, or
+None), timezone, WinRM listeners, additional unattend content, Azure Hybrid Benefit licensing, data
+disks with auto-assigned LUNs, spot pricing, zones and every placement option (availability sets,
+VMSS attachment, proximity groups, capacity reservations, dedicated hosts), ASG associations, static
+private IPs, accelerated networking, encryption at host, gallery applications, key vault certificate
+secrets (with their Windows certificate store), termination and OS image notifications, modern run
+commands (serialized after the monitor agent), and full patching controls. The often-forgotten subscription plumbing is opt-in and
+conditional too: `resource_provider_feature_registrations` (for example
+`Microsoft.Compute/EncryptionAtHost`, which a check reminds you about) and
+`resource_provider_registrations`, both documented as subscription-wide and single-owner.
+
+## Disclaimers (from the provider, worth knowing)
+
+- Terraform removes the OS disk with the VM by default (configurable via the provider `features`
+  block).
+- All arguments, including the administrator login and password, are stored in the raw state as
+  plain text: protect the state (and vault the retrievable copy write-only, as the examples show).
+- `azurerm_windows_virtual_machine` does not support unmanaged disks or attaching existing OS disks
+  (capture an image, or fall back to `azurerm_virtual_machine`).
+- `public_ip_address` outputs may be unpopulated for Dynamic public IPs.
+- `vm_agent_platform_updates_enabled` is platform-controlled and read-only; this module does not
+  touch it.
+
+## Usage
+
 ```hcl
-resource "azurerm_public_ip" "pip" {
-  for_each = { for vm in var.windows_vms : vm.name => vm if vm.public_ip_sku != null }
+module "windows_vm" {
+  source  = "libre-devops/windows-vm/azurerm"
+  version = "~> 4.0"
 
-  name                = each.value.pip_name != null ? each.value.pip_name : "pip-${each.value.name}"
-  location            = var.location
-  resource_group_name = var.rg_name
-  allocation_method   = each.value.allocation_method
-  domain_name_label   = try(each.value.pip_custom_dns_label, each.value.computer_name, null)
-  sku                 = each.value.public_ip_sku
-  tags                = var.tags
+  resource_group_id = module.rg.ids["rg-ldo-uks-prd-001"]
+  location          = "uksouth"
+  tags              = module.tags.tags
 
-  lifecycle {
-    ignore_changes = [domain_name_label]
-  }
-}
-
-resource "azurerm_network_interface" "nic" {
-  for_each = { for vm in var.windows_vms : vm.name => vm }
-
-  name                           = each.value.nic_name != null ? each.value.nic_name : "nic-${each.value.name}"
-  location                       = var.location
-  resource_group_name            = var.rg_name
-  accelerated_networking_enabled = each.value.enable_accelerated_networking
-
-  ip_configuration {
-    name                          = each.value.nic_ipconfig_name != null ? each.value.nic_ipconfig_name : "nic-ipcon-${each.value.name}"
-    primary                       = true
-    private_ip_address_allocation = each.value.static_private_ip == null ? "Dynamic" : "Static"
-    private_ip_address            = each.value.static_private_ip
-    public_ip_address_id          = lookup(each.value, "public_ip_sku", null) == null ? null : azurerm_public_ip.pip[each.key].id
-    subnet_id                     = each.value.subnet_id
-  }
-  tags = var.tags
-
-  timeouts {
-    create = "5m"
-    delete = "10m"
-  }
-}
-
-resource "azurerm_application_security_group" "asg" {
-  for_each = { for vm in var.windows_vms : vm.name => vm if vm.create_asg == true }
-
-  name                = each.value.asg_name != null ? each.value.asg_name : "asg-${each.value.name}"
-  location            = var.location
-  resource_group_name = var.rg_name
-  tags                = var.tags
-}
-
-resource "azurerm_network_interface_application_security_group_association" "asg_association" {
-  for_each = { for vm in var.windows_vms : vm.name => vm }
-
-  network_interface_id          = azurerm_network_interface.nic[each.key].id
-  application_security_group_id = each.value.asg_id != null ? each.value.asg_id : azurerm_application_security_group.asg[each.key].id
-}
-
-
-resource "random_integer" "zone" {
-  for_each = { for vm in var.windows_vms : vm.name => vm if vm.availability_zone == "random" }
-  min      = 1
-  max      = 3
-}
-
-locals {
-  sanitized_names = { for vm in var.windows_vms : vm.name => upper(replace(replace(replace(vm.name, " ", ""), "-", ""), "_", "")) }
-  netbios_names   = { for key, value in local.sanitized_names : key => substr(value, 0, min(length(value), 15)) }
-  random_zones    = { for idx, vm in var.windows_vms : vm.name => vm.availability_zone == "random" ? tostring(idx + 1) : vm.availability_zone }
-}
-
-resource "azurerm_windows_virtual_machine" "this" {
-  for_each = { for vm in var.windows_vms : vm.name => vm }
-
-  // Forces acceptance of marketplace terms before creating a VM
-  depends_on = [
-    azurerm_marketplace_agreement.plan_acceptance_simple,
-    azurerm_marketplace_agreement.plan_acceptance_custom
-  ]
-
-  name                         = each.value.name
-  resource_group_name          = var.rg_name
-  location                     = var.location
-  network_interface_ids        = [azurerm_network_interface.nic[each.key].id]
-  license_type                 = each.value.license_type
-  patch_mode                   = each.value.patch_mode
-  enable_automatic_updates     = each.value.enable_automatic_updates
-  computer_name                = each.value.computer_name != null ? each.value.computer_name : local.netbios_names[each.key]
-  admin_username               = each.value.admin_username
-  admin_password               = each.value.admin_password
-  size                         = each.value.vm_size
-  source_image_id              = try(each.value.use_custom_image, null) == true ? each.value.custom_source_image_id : null
-  zone                         = local.random_zones[each.key]
-  availability_set_id          = each.value.availability_set_id
-  virtual_machine_scale_set_id = each.value.virtual_machine_scale_set_id
-  timezone                     = each.value.timezone
-  user_data                    = each.value.user_data
-  custom_data                  = each.value.custom_data
-  tags                         = var.tags
-
-  encryption_at_host_enabled = each.value.enable_encryption_at_host
-  allow_extension_operations = each.value.allow_extension_operations
-  provision_vm_agent         = each.value.provision_vm_agent
-
-  dynamic "additional_capabilities" {
-    for_each = each.value.ultra_ssd_enabled ? [1] : []
-    content {
-      ultra_ssd_enabled = each.value.ultra_ssd_enabled
-    }
+  vm_insights = {
+    log_analytics_workspace_id = module.log_analytics.workspace_ids["log-ldo-uks-prd-001"]
   }
 
-  # Use simple image
-  dynamic "source_image_reference" {
-    for_each = try(each.value.use_simple_image, null) == true && try(each.value.use_simple_image_with_plan, null) == false && try(each.value.use_custom_image, null) == false ? [1] : []
-    content {
-      publisher = coalesce(each.value.vm_os_publisher, module.os_calculator[each.value.name].calculated_value_os_publisher)
-      offer     = coalesce(each.value.vm_os_offer, module.os_calculator[each.value.name].calculated_value_os_offer)
-      sku       = coalesce(each.value.vm_os_sku, module.os_calculator[each.value.name].calculated_value_os_sku)
-      version   = coalesce(each.value.vm_os_version, "latest")
-    }
-  }
+  windows_virtual_machines = {
+    "vm-ldo-app-uks-prd-001" = {
+      size                = "Standard_D2s_v5"
+      admin_username      = "azureadmin"
+      admin_password      = random_password.admin.result
+      source_image_simple = "WindowsServer2022AzureEdition"
+      subnet_id           = module.network.subnet_ids["snet-app"]
 
-
-  # Use custom image reference
-  dynamic "source_image_reference" {
-    for_each = try(each.value.use_simple_image, null) == false && try(each.value.use_simple_image_with_plan, null) == false && try(length(each.value.source_image_reference), 0) > 0 && try(length(each.value.plan), 0) == 0 && try(each.value.use_custom_image, null) == false ? [1] : []
-
-    content {
-      publisher = lookup(each.value.source_image_reference, "publisher", null)
-      offer     = lookup(each.value.source_image_reference, "offer", null)
-      sku       = lookup(each.value.source_image_reference, "sku", null)
-      version   = lookup(each.value.source_image_reference, "version", null)
-    }
-  }
-
-  dynamic "source_image_reference" {
-    for_each = try(each.value.use_simple_image, null) == true && try(each.value.use_simple_image_with_plan, null) == true && try(each.value.use_custom_image, null) == false ? [1] : []
-
-    content {
-      publisher = coalesce(each.value.vm_os_publisher, module.os_calculator_with_plan[each.value.name].calculated_value_os_publisher)
-      offer     = coalesce(each.value.vm_os_offer, module.os_calculator_with_plan[each.value.name].calculated_value_os_offer)
-      sku       = coalesce(each.value.vm_os_sku, module.os_calculator_with_plan[each.value.name].calculated_value_os_sku)
-      version   = coalesce(each.value.vm_os_version, "latest")
-    }
-  }
-
-
-  dynamic "plan" {
-    for_each = try(each.value.use_simple_image, null) == false && try(each.value.use_simple_image_with_plan, null) == false && try(length(each.value.plan), 0) > 0 && try(each.value.use_custom_image, null) == false ? [1] : []
-
-    content {
-      name      = coalesce(each.value.vm_os_sku, module.os_calculator_with_plan[each.value.name].calculated_value_os_sku)
-      product   = coalesce(each.value.vm_os_offer, module.os_calculator_with_plan[each.value.name].calculated_value_os_offer)
-      publisher = coalesce(each.value.vm_os_publisher, module.os_calculator_with_plan[each.value.name].calculated_value_os_publisher)
-    }
-  }
-
-
-  dynamic "plan" {
-    for_each = try(each.value.use_simple_image, null) == false && try(each.value.use_simple_image_with_plan, null) == false && try(length(each.value.plan), 0) > 0 && try(each.value.use_custom_image, null) == false ? [1] : []
-
-    content {
-      name      = lookup(each.value.plan, "name", null)
-      product   = lookup(each.value.plan, "product", null)
-      publisher = lookup(each.value.plan, "publisher", null)
-    }
-  }
-
-
-  dynamic "identity" {
-    for_each = each.value.identity_type == "SystemAssigned" ? [each.value.identity_type] : []
-    content {
-      type = each.value.identity_type
-    }
-  }
-
-  dynamic "identity" {
-    for_each = each.value.identity_type == "SystemAssigned, UserAssigned" ? [each.value.identity_type] : []
-    content {
-      type         = each.value.identity_type
-      identity_ids = try(each.value.identity_ids, [])
-    }
-  }
-
-  dynamic "identity" {
-    for_each = each.value.identity_type == "UserAssigned" ? [each.value.identity_type] : []
-    content {
-      type         = each.value.identity_type
-      identity_ids = length(try(each.value.identity_ids, [])) > 0 ? each.value.identity_ids : []
-    }
-  }
-
-
-  priority        = try(each.value.spot_instance, false) ? "Spot" : "Regular"
-  max_bid_price   = try(each.value.spot_instance, false) ? each.value.spot_instance_max_bid_price : null
-  eviction_policy = try(each.value.spot_instance, false) ? each.value.spot_instance_eviction_policy : null
-
-  os_disk {
-    name                             = each.value.os_disk.name != null ? each.value.os_disk.name : "osdisk-${each.value.name}"
-    caching                          = each.value.os_disk.caching
-    storage_account_type             = each.value.os_disk.os_disk_type
-    disk_size_gb                     = each.value.os_disk.disk_size_gb
-    disk_encryption_set_id           = each.value.os_disk.disk_encryption_set_id
-    secure_vm_disk_encryption_set_id = each.value.os_disk.secure_vm_disk_encryption_set_id
-    security_encryption_type         = each.value.os_disk.security_encryption_type
-    write_accelerator_enabled        = each.value.os_disk.write_accelerator_enabled
-
-    dynamic "diff_disk_settings" {
-      for_each = each.value.os_disk.diff_disk_settings != null ? [each.value.os_disk.diff_disk_settings] : []
-      content {
-        option = diff_disk_settings.value.option
-      }
-    }
-  }
-
-  dynamic "boot_diagnostics" {
-    for_each = each.value.boot_diagnostics_storage_account_uri != null ? [each.value.boot_diagnostics_storage_account_uri] : [null]
-    content {
-      storage_account_uri = boot_diagnostics.value
-    }
-  }
-
-
-  dynamic "additional_unattend_content" {
-    for_each = each.value.additional_unattend_content != null ? each.value.additional_unattend_content : []
-    content {
-      content = additional_unattend_content.value.content
-      setting = additional_unattend_content.value.setting
-    }
-  }
-
-  dynamic "secret" {
-    for_each = each.value.secrets != null ? each.value.secrets : []
-    content {
-      key_vault_id = secret.value.key_vault_id
-
-      dynamic "certificate" {
-        for_each = secret.value.certificates
-        content {
-          store = certificate.value.store
-          url   = certificate.value.url
-        }
-      }
-    }
-  }
-
-  dynamic "termination_notification" {
-    for_each = each.value.termination_notification != null ? [each.value.termination_notification] : []
-    content {
-      enabled = termination_notification.value.enabled
-      timeout = lookup(termination_notification.value, "timeout", "PT5M")
-    }
-  }
-
-  dynamic "winrm_listener" {
-    for_each = each.value.winrm_listener != null ? each.value.winrm_listener : []
-    content {
-      protocol        = winrm_listener.value.protocol
-      certificate_url = winrm_listener.value.certificate_url
+      patch_mode          = "AutomaticByPlatform"
+      hotpatching_enabled = true
+      timezone            = "GMT Standard Time"
     }
   }
 }
-
-module "os_calculator" {
-  source       = "libre-devops/windows-os-sku-calculator/azurerm"
-  for_each     = { for vm in var.windows_vms : vm.name => vm if try(vm.use_simple_image, null) == true }
-  vm_os_simple = each.value.vm_os_simple
-}
-
-module "os_calculator_with_plan" {
-  source       = "libre-devops/windows-os-sku-with-plan-calculator/azurerm"
-  for_each     = { for vm in var.windows_vms : vm.name => vm if try(vm.use_simple_image_with_plan, null) == true }
-  vm_os_simple = each.value.vm_os_simple
-}
-
-resource "azurerm_marketplace_agreement" "plan_acceptance_simple" {
-  for_each = { for vm in var.windows_vms : vm.name => vm if try(vm.use_simple_image_with_plan, null) == true && try(vm.accept_plan, null) == true && try(vm.use_custom_image, null) == false }
-
-  publisher = coalesce(each.value.vm_os_publisher, module.os_calculator_with_plan[each.key].calculated_value_os_publisher)
-  offer     = coalesce(each.value.vm_os_offer, module.os_calculator_with_plan[each.key].calculated_value_os_offer)
-  plan      = coalesce(each.value.vm_os_sku, module.os_calculator_with_plan[each.key].calculated_value_os_sku)
-}
-
-resource "azurerm_marketplace_agreement" "plan_acceptance_custom" {
-  for_each = { for vm in var.windows_vms : vm.name => vm if try(vm.use_custom_image_with_plan, null) == true && try(vm.accept_plan, null) == true && try(vm.use_custom_image, null) == true }
-
-  publisher = lookup(each.value.plan, "publisher", null)
-  offer     = lookup(each.value.plan, "product", null)
-  plan      = lookup(each.value.plan, "name", null)
-}
-
-################################################################################
-# Modern Run Command (azurerm_virtual_machine_run_command)                     #
-################################################################################
-resource "azurerm_virtual_machine_run_command" "windows_vm" {
-  for_each = {
-    for vm in var.windows_vms :
-    vm.name => vm
-    /*
-      Create the resource only when the user has supplied
-      *one* of inline | script_file | script_uri
-    */
-    if vm.run_vm_command != null && (
-      try(vm.run_vm_command.inline, null) != null ||
-      try(vm.run_vm_command.script_file, null) != null ||
-      try(vm.run_vm_command.script_uri, null) != null
-    )
-  }
-
-  # ────────────────────────────────────────────────────────
-  # Required top-level arguments
-  # ────────────────────────────────────────────────────────
-  name = coalesce(
-    try(each.value.run_vm_command.extension_name, null),
-    "run-cmd-${each.value.name}"
-  )
-  location           = var.location
-  virtual_machine_id = azurerm_windows_virtual_machine.this[each.key].id
-  run_as_user        = try(each.value.run_vm_command.run_as_user, each.value.admin_username, null)
-  run_as_password    = try(each.value.run_vm_command.run_as_password, each.value.admin_password, null)
-  tags               = var.tags
-
-  # ────────────────────────────────────────────────────────
-  # Source block – exactly one form per VM
-  # ────────────────────────────────────────────────────────
-  dynamic "source" {
-    # ── case 1: inline string ─────────────────────────────
-    for_each = try(each.value.run_vm_command.inline, null) != null ? [1] : []
-    content {
-      script = each.value.run_vm_command.inline
-    }
-  }
-
-  dynamic "source" {
-    # ── case 2: local script file ─────────────────────────
-    for_each = try(each.value.run_vm_command.script_file, null) != null ? [1] : []
-    content {
-      # Read the file content at plan time
-      script = file(each.value.run_vm_command.script_file)
-    }
-  }
-
-  dynamic "source" {
-    # ── case 3: remote URI ────────────────────────────────
-    for_each = try(each.value.run_vm_command.script_uri, null) != null ? [1] : []
-    content {
-      script_uri = each.value.run_vm_command.script_uri
-    }
-  }
-
-  # ────────────────────────────────────────────────────────
-  # Preconditions – enforce “one and only one” source type
-  # ────────────────────────────────────────────────────────
-  lifecycle {
-    precondition {
-      condition = (
-        length(compact([
-          try(each.value.run_vm_command.inline, null),
-          try(each.value.run_vm_command.script_file, null),
-          try(each.value.run_vm_command.script_uri, null)
-        ])) == 1
-      )
-      error_message = "run_vm_command for VM '${each.key}' must set exactly ONE of inline, script_file, or script_uri."
-    }
-
-    ignore_changes = [tags]
-  }
-}
-
 ```
+
+## Examples
+
+
+
+- [`examples/minimal`](./examples/minimal) - one VM with the secure defaults from a catalog image and
+  a generated password.
+- [`examples/complete`](./examples/complete) - the Windows "secure VM estate in a pinch" build: tags,
+  rg, vnet with an NSG admitting RDP only from inside the vnet, forward and reverse private DNS with
+  auto-registration, a free Developer bastion as the door, a vault holding the generated admin
+  password (written write-only), Log Analytics with VM Insights on every VM, and two hardened VMs
+  exercising the full surface (hotpatching on an AzureEdition image, timezone, data disks, spot,
+  zones, static IPs, Azure Hybrid Benefit, a PowerShell run command).
+
+## Developing
+
+Local work needs **PowerShell 7+** and **[`just`](https://github.com/casey/just)**, because the recipes
+wrap the [LibreDevOpsHelpers](https://www.powershellgallery.com/packages/LibreDevOpsHelpers)
+PowerShell module (the same engine the `libre-devops/terraform-azure` action runs in CI). Install
+just with `brew install just`, or `uv tool add rust-just` then `uv run just <recipe>`.
+
+Run `just` to list recipes: `just update-ldo-pwsh` (install or force-update LibreDevOpsHelpers from
+PSGallery), `just validate`, `just scan` (Trivy only), `just pwsh-analyze` (PSScriptAnalyzer only),
+`just plan`, `just apply`, `just destroy`, `just e2e`, `just test`, and `just docs` (the
+plan/apply/destroy recipes mirror the action, including the storage firewall dance; `just e2e`
+applies an example then always destroys it, defaulting to `minimal`, so nothing is left running).
+Releasing is also `just`:
+`just increment-release [patch|minor|major]` bumps, tags, and publishes a GitHub release, and the
+Terraform Registry picks up the tag.
+
+## Security scan exceptions
+
+This module is scanned with [Trivy](https://github.com/aquasecurity/trivy); HIGH and CRITICAL
+findings fail the build. Any waiver is a deliberate, reviewed decision, never a way to quiet a
+finding that should be fixed. Waivers live in [`.trivyignore.yaml`](./.trivyignore.yaml) (the
+machine-applied source of truth, passed to Trivy with `--ignorefile`) and are mirrored in a table
+here so the reason is auditable.
+
+There are currently **no exceptions**: the module and its examples scan clean. The module's whole
+point is that the hardened shape is the default shape, so there is nothing to waive.
+
+To add an exception: add an entry to `.trivyignore.yaml` (`id`, optional `paths` to scope it, and a
+`statement` recording why), then add a matching row here recording the reason. Both the file and
+the table are reviewed in the pull request.
+
+## Reference
+
+The Requirements, Providers, Inputs, Outputs, and Resources below are generated by `terraform-docs`.
+
+<!-- BEGIN_TF_DOCS -->
 ## Requirements
 
-No requirements.
+| Name | Version |
+|------|---------|
+| <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.9.0, < 2.0.0 |
+| <a name="requirement_azurerm"></a> [azurerm](#requirement\_azurerm) | >= 4.0.0, < 5.0.0 |
 
 ## Providers
 
 | Name | Version |
 |------|---------|
-| <a name="provider_azurerm"></a> [azurerm](#provider\_azurerm) | 4.27.0 |
-| <a name="provider_random"></a> [random](#provider\_random) | 3.7.2 |
+| <a name="provider_azurerm"></a> [azurerm](#provider\_azurerm) | >= 4.0.0, < 5.0.0 |
 
 ## Modules
 
-| Name | Source | Version |
-|------|--------|---------|
-| <a name="module_os_calculator"></a> [os\_calculator](#module\_os\_calculator) | libre-devops/windows-os-sku-calculator/azurerm | n/a |
-| <a name="module_os_calculator_with_plan"></a> [os\_calculator\_with\_plan](#module\_os\_calculator\_with\_plan) | libre-devops/windows-os-sku-with-plan-calculator/azurerm | n/a |
+No modules.
 
 ## Resources
 
 | Name | Type |
 |------|------|
-| [azurerm_application_security_group.asg](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/application_security_group) | resource |
-| [azurerm_marketplace_agreement.plan_acceptance_custom](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/marketplace_agreement) | resource |
-| [azurerm_marketplace_agreement.plan_acceptance_simple](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/marketplace_agreement) | resource |
-| [azurerm_network_interface.nic](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/network_interface) | resource |
-| [azurerm_network_interface_application_security_group_association.asg_association](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/network_interface_application_security_group_association) | resource |
-| [azurerm_public_ip.pip](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/public_ip) | resource |
-| [azurerm_virtual_machine_run_command.windows_vm](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/virtual_machine_run_command) | resource |
+| [azurerm_managed_disk.data](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/managed_disk) | resource |
+| [azurerm_marketplace_agreement.this](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/marketplace_agreement) | resource |
+| [azurerm_monitor_data_collection_rule.vm_insights](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/monitor_data_collection_rule) | resource |
+| [azurerm_monitor_data_collection_rule_association.vm_insights](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/monitor_data_collection_rule_association) | resource |
+| [azurerm_network_interface.this](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/network_interface) | resource |
+| [azurerm_network_interface_application_security_group_association.this](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/network_interface_application_security_group_association) | resource |
+| [azurerm_resource_provider_feature_registration.this](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/resource_provider_feature_registration) | resource |
+| [azurerm_resource_provider_registration.this](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/resource_provider_registration) | resource |
+| [azurerm_virtual_machine_data_disk_attachment.data](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/virtual_machine_data_disk_attachment) | resource |
+| [azurerm_virtual_machine_extension.monitor_agent](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/virtual_machine_extension) | resource |
+| [azurerm_virtual_machine_run_command.this](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/virtual_machine_run_command) | resource |
 | [azurerm_windows_virtual_machine.this](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/windows_virtual_machine) | resource |
-| [random_integer.zone](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/integer) | resource |
 
 ## Inputs
 
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
-| <a name="input_location"></a> [location](#input\_location) | The region to place the resources | `string` | n/a | yes |
-| <a name="input_rg_name"></a> [rg\_name](#input\_rg\_name) | The resource group name to place the scale sets in | `string` | n/a | yes |
-| <a name="input_tags"></a> [tags](#input\_tags) | Tags to be applied to the resource | `map(string)` | n/a | yes |
-| <a name="input_windows_vms"></a> [windows\_vms](#input\_windows\_vms) | List of VM configurations. | <pre>list(object({<br/>    accept_plan = optional(bool, false)<br/>    additional_unattend_content = optional(list(object({<br/>      content = string<br/>      setting = string<br/>    })))<br/>    admin_password                       = string<br/>    admin_username                       = string<br/>    allocation_method                    = optional(string, "Static")<br/>    allow_extension_operations           = optional(bool, true)<br/>    asg_id                               = optional(string, null)<br/>    asg_name                             = optional(string, null)<br/>    availability_set_id                  = optional(string)<br/>    availability_zone                    = optional(string, "random")<br/>    boot_diagnostics_storage_account_uri = optional(string, null)<br/>    secrets = optional(list(object({<br/>      key_vault_id = string<br/>      certificates = list(object({<br/>        store = string<br/>        url   = string<br/>      }))<br/>    })))<br/>    computer_name                 = optional(string)<br/>    create_asg                    = optional(bool, true)<br/>    custom_data                   = optional(string)<br/>    custom_source_image_id        = optional(string, null)<br/>    enable_accelerated_networking = optional(bool, false)<br/>    enable_automatic_updates      = optional(bool, true)<br/>    enable_encryption_at_host     = optional(bool, false)<br/>    identity_ids                  = optional(list(string))<br/>    identity_type                 = optional(string)<br/>    license_type                  = optional(string)<br/>    name                          = string<br/>    nic_ipconfig_name             = optional(string)<br/>    nic_name                      = optional(string, null)<br/>    os_disk = object({<br/>      caching      = optional(string, "ReadWrite")<br/>      os_disk_type = optional(string, "StandardSSD_LRS")<br/>      diff_disk_settings = optional(object({<br/>        option = string<br/>      }))<br/>      disk_encryption_set_id           = optional(string, null)<br/>      disk_size_gb                     = optional(number, "127")<br/>      name                             = optional(string, null)<br/>      secure_vm_disk_encryption_set_id = optional(string, null)<br/>      security_encryption_type         = optional(string, null)<br/>      write_accelerator_enabled        = optional(bool, false)<br/>    })<br/>    patch_mode                    = optional(string, "AutomaticByOS")<br/>    pip_custom_dns_label          = optional(string)<br/>    pip_name                      = optional(string)<br/>    provision_vm_agent            = optional(bool, true)<br/>    public_ip_sku                 = optional(string, null)<br/>    source_image_reference        = optional(map(string))<br/>    spot_instance                 = optional(bool, false)<br/>    spot_instance_eviction_policy = optional(string)<br/>    spot_instance_max_bid_price   = optional(string)<br/>    static_private_ip             = optional(string)<br/>    subnet_id                     = string<br/>    termination_notification = optional(object({<br/>      enabled = bool<br/>      timeout = optional(string)<br/>    }))<br/>    run_vm_command = optional(object({<br/>      extension_name  = optional(string)<br/>      inline          = optional(string)<br/>      script_file     = optional(string)<br/>      script_uri      = optional(string)<br/>      run_as_user     = optional(string)<br/>      run_as_password = optional(string)<br/>    }))<br/>    timezone                     = optional(string)<br/>    ultra_ssd_enabled            = optional(bool, false)<br/>    use_custom_image             = optional(bool, false)<br/>    use_custom_image_with_plan   = optional(bool, false)<br/>    use_simple_image             = optional(bool, true)<br/>    use_simple_image_with_plan   = optional(bool, false)<br/>    user_data                    = optional(string, null)<br/>    virtual_machine_scale_set_id = optional(string, null)<br/>    vm_os_id                     = optional(string, "")<br/>    vm_os_offer                  = optional(string)<br/>    vm_os_publisher              = optional(string)<br/>    vm_os_simple                 = optional(string)<br/>    vm_os_sku                    = optional(string)<br/>    vm_os_version                = optional(string)<br/>    vm_size                      = string<br/>    vtpm_enabled                 = optional(bool, false)<br/>    winrm_listener = optional(list(object({<br/>      protocol        = string<br/>      certificate_url = optional(string)<br/>    })))<br/>  }))</pre> | `[]` | no |
+| <a name="input_location"></a> [location](#input\_location) | Azure region for the VMs. | `string` | n/a | yes |
+| <a name="input_resource_group_id"></a> [resource\_group\_id](#input\_resource\_group\_id) | Resource id of the resource group to create the VMs in. The name is parsed from it (pass the rg module's ids output). | `string` | n/a | yes |
+| <a name="input_resource_provider_feature_registrations"></a> [resource\_provider\_feature\_registrations](#input\_resource\_provider\_feature\_registrations) | Preview/opt-in features to register, as "Namespace/FeatureName" strings (for example<br/>"Microsoft.Compute/EncryptionAtHost", the classic forgotten prerequisite for<br/>encryption\_at\_host\_enabled). Empty (the default) manages nothing. Registration is subscription-wide<br/>and can take several minutes to propagate. | `set(string)` | `[]` | no |
+| <a name="input_resource_provider_registrations"></a> [resource\_provider\_registrations](#input\_resource\_provider\_registrations) | Resource provider namespaces to register on the subscription (for example Microsoft.Monitor), for<br/>subscriptions where the provider has never been used. Empty (the default) manages nothing. NOTE: a<br/>namespace already registered elsewhere will conflict on import/destroy; this is for the deliberate<br/>owner only, and the provider's own resource\_provider\_registrations setting must not also manage it. | `set(string)` | `[]` | no |
+| <a name="input_tags"></a> [tags](#input\_tags) | Tags applied to every resource this module creates (merged with any per-VM tags). | `map(string)` | `{}` | no |
+| <a name="input_vm_insights"></a> [vm\_insights](#input\_vm\_insights) | Opt-in VM Insights for every VM in this call: the module installs the Azure Monitor agent (each VM's<br/>system-assigned identity is what the agent authenticates with, which the module enables by default),<br/>creates the VM Insights data collection rule pointed at log\_analytics\_workspace\_id (or associates an<br/>existing one passed as data\_collection\_rule\_id), and associates every VM with it. null (the default)<br/>creates nothing. | <pre>object({<br/>    log_analytics_workspace_id = optional(string)<br/>    data_collection_rule_id    = optional(string)<br/>  })</pre> | `null` | no |
+| <a name="input_windows_virtual_machines"></a> [windows\_virtual\_machines](#input\_windows\_virtual\_machines) | The Windows VMs to create, keyed by VM name. Each VM gets its own NIC (subnet\_id is where it lives;<br/>public\_ip\_address\_id is ONLY an input, public IPs live in the public-ip module).<br/><br/>SECURE DEFAULTS: Trusted Launch (secure\_boot\_enabled and vtpm\_enabled true; the image catalog<br/>entries are all Gen2 and Trusted Launch capable), a system-assigned managed identity, managed boot<br/>diagnostics, automatic OS updates, and platform patch assessment. admin\_password is required<br/>(Windows has no key-only mode); generate it with random\_password and copy it into a key vault with<br/>the keyvault-secret module's write-only handling.<br/><br/>IMAGE SELECTION, exactly one of:<br/>- source\_image\_simple: a friendly catalog key (WindowsServer2022, WindowsServer2022AzureEdition,<br/>  WindowsServer2025, WindowsServer2025AzureEdition; see the image\_catalog\_keys output), verified<br/>  Gen2/Trusted Launch marketplace references. The AzureEdition entries are the hotpatching-capable<br/>  ones.<br/>- source\_image\_reference: { publisher, offer, sku, version (default latest) } for anything else.<br/>- source\_image\_id: a custom or gallery image id.<br/>Marketplace plan images: set plan { name, product, publisher } and optionally<br/>accept\_marketplace\_agreement = true to create the azurerm\_marketplace\_agreement.<br/><br/>NETWORKING per VM: subnet\_id (required), private\_ip\_address (static when set), public\_ip\_address\_id,<br/>accelerated\_networking\_enabled (default false; not every size supports it), ip\_forwarding\_enabled,<br/>dns\_servers, application\_security\_group\_ids (associations only; ASGs live with the network modules),<br/>nic\_name / ipconfig\_name overrides.<br/><br/>DISKS: os\_disk (caching ReadWrite, StandardSSD\_LRS by default, plus size, encryption set, security<br/>encryption, write accelerator, diff\_disk\_settings) and data\_disks keyed by name (size\_gb required;<br/>lun auto-assigned by declaration order unless set; storage\_account\_type, caching, create\_option,<br/>encryption set, zone follows the VM).<br/><br/>EVERYTHING ELSE: zone, availability\_set\_id, virtual\_machine\_scale\_set\_id, proximity\_placement\_group\_id,<br/>capacity\_reservation\_group\_id, dedicated\_host\_id / dedicated\_host\_group\_id, platform\_fault\_domain,<br/>edge\_zone; spot { max\_bid\_price, eviction\_policy }; additional\_capabilities (ultra SSD, hibernation);<br/>encryption\_at\_host\_enabled (subscription feature-gated; see resource\_provider\_feature\_registrations<br/>for the often-forgotten registration); identity (SystemAssigned by default, UserAssigned, both as<br/>"SystemAssigned, UserAssigned", or None for no identity at all); patching (patch\_mode default<br/>AutomaticByOS, patch\_assessment\_mode default AutomaticByPlatform, automatic\_updates\_enabled default<br/>true, hotpatching\_enabled for AzureEdition images with AutomaticByPlatform patching, reboot\_setting,<br/>bypass flag); timezone; license\_type (None by default; "Windows\_Server" claims Azure Hybrid<br/>Benefit); user\_data / custom\_data; computer\_name (Windows caps it at 15 characters, so it defaults<br/>to the VM name upper-cased, separators stripped, truncated to 15);<br/>disk\_controller\_type; extensions\_time\_budget; gallery\_applications; secrets (key vault certificates<br/>with their Windows certificate store); winrm\_listeners; additional\_unattend\_content;<br/>termination\_notification; os\_image\_notification; boot\_diagnostics\_storage\_account\_uri (unset =<br/>managed storage); run\_command { script \| script\_uri \| command\_id, run\_as\_user, run\_as\_password };<br/>monitor\_agent\_enabled (default true, only relevant when vm\_insights is set) and per-VM tags.<br/><br/>PROVIDER DISCLAIMERS worth knowing: the OS disk is deleted with the VM by default (configurable via<br/>the provider features block); all arguments including the administrator login and password are<br/>stored in the raw state as plain text (protect the state); unmanaged disks and attaching existing<br/>OS disks are not supported by azurerm\_windows\_virtual\_machine; and public\_ip\_address outputs may be<br/>unpopulated for Dynamic public IPs. | <pre>map(object({<br/>    size           = string<br/>    admin_username = string<br/>    admin_password = string<br/><br/>    source_image_simple = optional(string)<br/>    source_image_reference = optional(object({<br/>      publisher = string<br/>      offer     = string<br/>      sku       = string<br/>      version   = optional(string, "latest")<br/>    }))<br/>    source_image_id = optional(string)<br/>    plan = optional(object({<br/>      name      = string<br/>      product   = string<br/>      publisher = string<br/>    }))<br/>    accept_marketplace_agreement = optional(bool, false)<br/><br/>    subnet_id                      = string<br/>    private_ip_address             = optional(string)<br/>    public_ip_address_id           = optional(string)<br/>    accelerated_networking_enabled = optional(bool, false)<br/>    ip_forwarding_enabled          = optional(bool, false)<br/>    dns_servers                    = optional(list(string))<br/>    application_security_group_ids = optional(list(string), [])<br/>    nic_name                       = optional(string)<br/>    ipconfig_name                  = optional(string)<br/><br/>    os_disk = optional(object({<br/>      name                             = optional(string)<br/>      caching                          = optional(string, "ReadWrite")<br/>      storage_account_type             = optional(string, "StandardSSD_LRS")<br/>      disk_size_gb                     = optional(number)<br/>      disk_encryption_set_id           = optional(string)<br/>      secure_vm_disk_encryption_set_id = optional(string)<br/>      security_encryption_type         = optional(string)<br/>      write_accelerator_enabled        = optional(bool, false)<br/>      diff_disk_settings = optional(object({<br/>        option = string<br/>      }))<br/>    }), {})<br/><br/>    data_disks = optional(map(object({<br/>      disk_size_gb           = number<br/>      lun                    = optional(number)<br/>      storage_account_type   = optional(string, "StandardSSD_LRS")<br/>      caching                = optional(string, "ReadWrite")<br/>      create_option          = optional(string, "Empty")<br/>      source_resource_id     = optional(string)<br/>      disk_encryption_set_id = optional(string)<br/>    })), {})<br/><br/>    secure_boot_enabled        = optional(bool, true)<br/>    vtpm_enabled               = optional(bool, true)<br/>    encryption_at_host_enabled = optional(bool)<br/><br/>    identity = optional(object({<br/>      type         = optional(string, "SystemAssigned")<br/>      identity_ids = optional(list(string))<br/>    }), {})<br/><br/>    boot_diagnostics_enabled             = optional(bool, true)<br/>    boot_diagnostics_storage_account_uri = optional(string)<br/><br/>    patch_mode                                             = optional(string, "AutomaticByOS")<br/>    automatic_updates_enabled                              = optional(bool, true)<br/>    hotpatching_enabled                                    = optional(bool, false)<br/>    timezone                                               = optional(string)<br/>    patch_assessment_mode                                  = optional(string, "AutomaticByPlatform")<br/>    bypass_platform_safety_checks_on_user_schedule_enabled = optional(bool, false)<br/>    reboot_setting                                         = optional(string)<br/>    provision_vm_agent                                     = optional(bool, true)<br/>    allow_extension_operations                             = optional(bool, true)<br/>    extensions_time_budget                                 = optional(string)<br/><br/>    zone                          = optional(string)<br/>    availability_set_id           = optional(string)<br/>    virtual_machine_scale_set_id  = optional(string)<br/>    proximity_placement_group_id  = optional(string)<br/>    capacity_reservation_group_id = optional(string)<br/>    dedicated_host_id             = optional(string)<br/>    dedicated_host_group_id       = optional(string)<br/>    platform_fault_domain         = optional(number)<br/>    edge_zone                     = optional(string)<br/><br/>    spot = optional(object({<br/>      max_bid_price   = optional(number, -1)<br/>      eviction_policy = optional(string, "Deallocate")<br/>    }))<br/><br/>    additional_capabilities = optional(object({<br/>      ultra_ssd_enabled   = optional(bool, false)<br/>      hibernation_enabled = optional(bool, false)<br/>    }))<br/><br/>    license_type         = optional(string)<br/>    user_data            = optional(string)<br/>    custom_data          = optional(string)<br/>    computer_name        = optional(string)<br/>    disk_controller_type = optional(string)<br/><br/>    gallery_applications = optional(list(object({<br/>      version_id                                  = string<br/>      automatic_upgrade_enabled                   = optional(bool)<br/>      configuration_blob_uri                      = optional(string)<br/>      order                                       = optional(number)<br/>      tag                                         = optional(string)<br/>      treat_failure_as_deployment_failure_enabled = optional(bool)<br/>    })), [])<br/><br/>    secrets = optional(list(object({<br/>      key_vault_id = string<br/>      certificates = list(object({<br/>        url   = string<br/>        store = optional(string)<br/>      }))<br/>    })), [])<br/><br/>    winrm_listeners = optional(list(object({<br/>      protocol        = string<br/>      certificate_url = optional(string)<br/>    })), [])<br/><br/>    additional_unattend_content = optional(list(object({<br/>      setting = string<br/>      content = string<br/>    })), [])<br/><br/>    termination_notification = optional(object({<br/>      enabled = bool<br/>      timeout = optional(string)<br/>    }))<br/>    os_image_notification_timeout = optional(string)<br/><br/>    run_command = optional(object({<br/>      name            = optional(string)<br/>      script          = optional(string)<br/>      script_uri      = optional(string)<br/>      command_id      = optional(string)<br/>      run_as_user     = optional(string)<br/>      run_as_password = optional(string)<br/>    }))<br/><br/>    monitor_agent_enabled = optional(bool, true)<br/>    tags                  = optional(map(string))<br/>  }))</pre> | `{}` | no |
 
 ## Outputs
 
 | Name | Description |
 |------|-------------|
-| <a name="output_asg_ids"></a> [asg\_ids](#output\_asg\_ids) | List of ASG IDs. |
-| <a name="output_asg_names"></a> [asg\_names](#output\_asg\_names) | List of ASG Names. |
-| <a name="output_managed_identities"></a> [managed\_identities](#output\_managed\_identities) | Managed identities of the VMs |
-| <a name="output_nic_private_ipv4_addresses"></a> [nic\_private\_ipv4\_addresses](#output\_nic\_private\_ipv4\_addresses) | List of NIC Private IPv4 Addresses. |
-| <a name="output_public_ip_ids"></a> [public\_ip\_ids](#output\_public\_ip\_ids) | List of Public IP IDs. |
-| <a name="output_public_ip_names"></a> [public\_ip\_names](#output\_public\_ip\_names) | List of Public IP Names. |
-| <a name="output_public_ip_values"></a> [public\_ip\_values](#output\_public\_ip\_values) | List of Public IP Addresses. |
-| <a name="output_vm_details_map"></a> [vm\_details\_map](#output\_vm\_details\_map) | A map where the key is the VM name and the value is another map containing the VM ID and private IP address. |
-| <a name="output_vm_ids"></a> [vm\_ids](#output\_vm\_ids) | List of VM IDs. |
-| <a name="output_vm_names"></a> [vm\_names](#output\_vm\_names) | List of VM Names. |
-| <a name="output_vm_run_command_ids"></a> [vm\_run\_command\_ids](#output\_vm\_run\_command\_ids) | Resource IDs of azurerm\_virtual\_machine\_run\_command objects |
-| <a name="output_vm_run_command_instance_view"></a> [vm\_run\_command\_instance\_view](#output\_vm\_run\_command\_instance\_view) | Instance view of azurerm\_virtual\_machine\_run\_command objects |
-| <a name="output_vm_run_command_locations"></a> [vm\_run\_command\_locations](#output\_vm\_run\_command\_locations) | Azure region where each run-command resource is created |
-| <a name="output_vm_run_command_names"></a> [vm\_run\_command\_names](#output\_vm\_run\_command\_names) | Name property of each run-command resource |
-| <a name="output_vm_run_command_script_uris"></a> [vm\_run\_command\_script\_uris](#output\_vm\_run\_command\_script\_uris) | Script URIs for commands defined via script\_uri |
-| <a name="output_vm_run_command_scripts"></a> [vm\_run\_command\_scripts](#output\_vm\_run\_command\_scripts) | Inline script content for commands defined via inline or script\_file |
+| <a name="output_data_collection_rule_id"></a> [data\_collection\_rule\_id](#output\_data\_collection\_rule\_id) | The VM Insights data collection rule in effect (created or passed in); null when vm\_insights is off. |
+| <a name="output_data_disk_ids"></a> [data\_disk\_ids](#output\_data\_disk\_ids) | Map of "vm\|disk" to managed disk id. |
+| <a name="output_data_disks"></a> [data\_disks](#output\_data\_disks) | The data disks, keyed "vm\|disk". Full resource objects. |
+| <a name="output_identity_principal_ids"></a> [identity\_principal\_ids](#output\_identity\_principal\_ids) | Map of VM name to the system-assigned identity principal id (what RBAC assignments target; null when the VM has no system identity). |
+| <a name="output_ids"></a> [ids](#output\_ids) | Map of VM name to resource id. |
+| <a name="output_ids_zipmap"></a> [ids\_zipmap](#output\_ids\_zipmap) | Map of VM name to { name, id }, for easy composition with other modules. |
+| <a name="output_image_catalog"></a> [image\_catalog](#output\_image\_catalog) | The full image catalog (key => { publisher, offer, sku }), verified Gen2 / Trusted Launch capable marketplace references. |
+| <a name="output_image_catalog_keys"></a> [image\_catalog\_keys](#output\_image\_catalog\_keys) | Every friendly key the image catalog offers for source\_image\_simple. |
+| <a name="output_names"></a> [names](#output\_names) | Map of VM name to name (convenience passthrough). |
+| <a name="output_network_interface_ids"></a> [network\_interface\_ids](#output\_network\_interface\_ids) | Map of VM name to NIC id. |
+| <a name="output_network_interfaces"></a> [network\_interfaces](#output\_network\_interfaces) | The NICs, keyed by VM name. Full resource objects. |
+| <a name="output_private_ip_addresses"></a> [private\_ip\_addresses](#output\_private\_ip\_addresses) | Map of VM name to primary private IP address. |
+| <a name="output_resource_group_name"></a> [resource\_group\_name](#output\_resource\_group\_name) | The resource group the VMs live in, parsed from resource\_group\_id. |
+| <a name="output_virtual_machine_ids"></a> [virtual\_machine\_ids](#output\_virtual\_machine\_ids) | Map of VM name to the unique VM id (the compute fabric's GUID, not the resource id). |
+| <a name="output_windows_virtual_machines"></a> [windows\_virtual\_machines](#output\_windows\_virtual\_machines) | The VMs, keyed by name: every attribute except the provider's deprecated vm\_agent\_platform\_updates\_enabled and enable\_automatic\_updates (a full-object output would trip their deprecation warnings). Sensitive because admin\_password and custom\_data are inside. |
+<!-- END_TF_DOCS -->
