@@ -4,7 +4,7 @@ locals {
 
   # Catalog resolution: a missing key falls back to a placeholder so expansion never errors
   # mid-expression, and the VM resource's precondition fails the plan with the valid key list.
-  catalog_fallback = { publisher = "(unknown)", offer = "(unknown)", sku = "(unknown)", plan = null }
+  catalog_fallback = { publisher = "(unknown)", offer = "(unknown)", sku = "(unknown)", plan = null, license_type = null }
 
   resolved_image_reference = {
     for k, v in var.windows_virtual_machines : k => (
@@ -28,6 +28,33 @@ locals {
         ? lookup(local.image_catalog, coalesce(v.source_image_simple, "-"), local.catalog_fallback).plan
         : null
       )
+    )
+  }
+
+  # Effective license_type: an explicit value wins, otherwise the catalog entry's flows automatically
+  # (Windows_Client on the Windows 11 entries, null on the Server ones).
+  resolved_license_type = {
+    for k, v in var.windows_virtual_machines : k => (
+      v.license_type != null ? v.license_type : (
+        v.source_image_simple != null
+        ? lookup(local.image_catalog, coalesce(v.source_image_simple, "-"), local.catalog_fallback).license_type
+        : null
+      )
+    )
+  }
+
+  # VMs on a Windows client (desktop) marketplace image, whether from the catalog or an explicit
+  # source_image_reference. Custom images (source_image_id) cannot be inspected at plan time.
+  client_os_vms = sort([for k, v in local.resolved_image_reference : k if lower(v.publisher) == "microsoftwindowsdesktop"])
+
+  # Effective patch assessment mode: an explicit value wins, otherwise AutomaticByPlatform (Azure
+  # Update Manager periodic assessment) on Server and ImageDefault on Windows client images, because
+  # Azure guest patching rejects AutomaticByPlatform for desktop images with a 400 ("The selected VM
+  # image is not supported for VM Guest patch operations"), verified live on 2026-11-12.
+  resolved_patch_assessment_mode = {
+    for k, v in var.windows_virtual_machines : k => coalesce(
+      v.patch_assessment_mode,
+      contains(local.client_os_vms, k) ? "ImageDefault" : "AutomaticByPlatform"
     )
   }
 

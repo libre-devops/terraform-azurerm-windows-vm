@@ -114,7 +114,7 @@ output "image_catalog_keys" {
 }
 
 output "image_catalog" {
-  description = "The full image catalog (key => { publisher, offer, sku }), verified Gen2 / Trusted Launch capable marketplace references."
+  description = "The full image catalog (key => { publisher, offer, sku, plan, license_type }), verified Gen2 / Trusted Launch capable marketplace references."
   value       = local.image_catalog
 }
 

@@ -119,7 +119,7 @@ resource "azurerm_windows_virtual_machine" "this" {
   automatic_updates_enabled                              = each.value.automatic_updates_enabled
   hotpatching_enabled                                    = each.value.hotpatching_enabled
   timezone                                               = each.value.timezone
-  patch_assessment_mode                                  = each.value.patch_assessment_mode
+  patch_assessment_mode                                  = local.resolved_patch_assessment_mode[each.key]
   bypass_platform_safety_checks_on_user_schedule_enabled = each.value.bypass_platform_safety_checks_on_user_schedule_enabled
   reboot_setting                                         = each.value.reboot_setting
   provision_vm_agent                                     = each.value.provision_vm_agent
@@ -148,7 +148,7 @@ resource "azurerm_windows_virtual_machine" "this" {
     }
   }
 
-  license_type         = each.value.license_type
+  license_type         = local.resolved_license_type[each.key]
   user_data            = each.value.user_data
   custom_data          = each.value.custom_data
   computer_name        = local.computer_names[each.key]
@@ -215,6 +215,10 @@ resource "azurerm_windows_virtual_machine" "this" {
     precondition {
       condition     = each.value.source_image_simple == null || contains(keys(local.image_catalog), coalesce(each.value.source_image_simple, "-"))
       error_message = "VM \"${each.key}\": source_image_simple must be one of the catalog keys: ${join(", ", sort(keys(local.image_catalog)))}."
+    }
+    precondition {
+      condition     = !contains(local.client_os_vms, each.key) || (each.value.patch_mode != "AutomaticByPlatform" && local.resolved_patch_assessment_mode[each.key] != "AutomaticByPlatform")
+      error_message = "VM \"${each.key}\": Windows client (desktop) images do not support Azure guest patching, so patch_mode and patch_assessment_mode cannot be AutomaticByPlatform (the API rejects it with a 400). Leave both unset: patch_mode defaults to AutomaticByOS and patch_assessment_mode to ImageDefault on desktops."
     }
     precondition {
       condition     = local.vm_insights_enabled && each.value.monitor_agent_enabled ? each.value.identity.type != "None" : true

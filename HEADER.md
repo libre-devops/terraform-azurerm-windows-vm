@@ -30,8 +30,8 @@ VMs keyed by name, each with its own NIC, built so the SECURE shape is the ZERO-
 
 - **Trusted Launch** (secure boot + vTPM) on by default.
 - **A system-assigned managed identity** on every VM (what the monitor agent and RBAC grants use).
-- **Managed boot diagnostics**, **automatic OS updates**, and **platform patch assessment** on by
-  default.
+- **Managed boot diagnostics**, **automatic OS updates**, and **platform patch assessment** (Server
+  images) on by default.
 - **Public IPs are inputs only** (they live in the public-ip module), and attaching one is
   plan-visible; the intended door is the bastion module's free Developer SKU.
 - **Passwords, handled properly**: admin_password is required (Windows has no key-only mode);
@@ -40,11 +40,26 @@ VMs keyed by name, each with its own NIC, built so the SECURE shape is the ZERO-
   on Windows, so they derive from the VM name automatically.
 
 **The image catalog** replaces the old external "SKU calculator" modules: `source_image_simple`
-takes a friendly key (`Ubuntu2204`, `Ubuntu2404`, `Debian12`, `RHEL9`, `Sles15`, `Rocky9`; discover
-them via the `image_catalog_keys` output) resolving to marketplace references verified against the
-live platform, all Gen2 and Trusted Launch capable; Rocky carries its marketplace plan automatically. `source_image_reference` and `source_image_id` remain
-first-class, and marketplace `plan` images get their `azurerm_marketplace_agreement` created
-(deduplicated) when `accept_marketplace_agreement = true`.
+takes a friendly key (`WindowsServer2022`, `WindowsServer2022AzureEdition`, `WindowsServer2025`,
+`WindowsServer2025AzureEdition`, `Windows11Pro25H2`, `Windows11Enterprise25H2`,
+`Windows11Enterprise24H2`; discover them via the `image_catalog_keys` output) resolving to
+marketplace references verified against the live platform, all Gen2 and Trusted Launch capable.
+`source_image_reference` and `source_image_id` remain first-class, and marketplace `plan` images get
+their `azurerm_marketplace_agreement` created (deduplicated) when `accept_marketplace_agreement =
+true`.
+
+**Windows 11 desktops** come from the same catalog. The `Windows11*` keys pin the feature update
+(changing an image reference replaces the VM, so a module upgrade never moves you to a new release)
+and set `license_type = "Windows_Client"` for you: that is the multi-tenant hosting rights
+attestation Microsoft requires to run Windows 10/11 on Azure, which needs eligible per-user
+licensing (Windows or Microsoft 365 E3/E5, A3/A5, or Business Premium). An explicit `license_type`
+always wins, and the `windows_client_license_type` check warns when a desktop image (catalog or
+`source_image_reference`) ends up without it. Server-only features stay Server-only: Azure
+hotpatching needs `WindowsServer2025AzureEdition`, and Azure guest patching rejects desktop images
+outright (a 400 at create, verified live), so on desktops `patch_assessment_mode` resolves to
+`ImageDefault` instead of `AutomaticByPlatform`, `patch_mode` stays `AutomaticByOS` (Windows Update,
+or Intune/Autopatch once enrolled), and setting either to `AutomaticByPlatform` fails the plan with
+an explanation.
 
 **VM Insights in one attribute**: `vm_insights = { log_analytics_workspace_id = ... }` installs the
 Azure Monitor agent on every VM (per-VM opt-out), creates the VM Insights data collection rule (or
@@ -99,6 +114,16 @@ module "windows_vm" {
 
       patch_mode          = "AutomaticByPlatform"
       hotpatching_enabled = true
+      timezone            = "GMT Standard Time"
+    }
+
+    # A Windows 11 desktop: license_type = "Windows_Client" comes from the catalog entry.
+    "vm-ldo-dsk-uks-prd-001" = {
+      size                = "Standard_D2lds_v6"
+      admin_username      = "azureadmin"
+      admin_password      = random_password.admin.result
+      source_image_simple = "Windows11Enterprise25H2"
+      subnet_id           = module.network.subnet_ids["snet-app"]
       timezone            = "GMT Standard Time"
     }
   }

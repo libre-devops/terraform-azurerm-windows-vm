@@ -53,9 +53,11 @@ the keyvault-secret module's write-only handling.
 
 IMAGE SELECTION, exactly one of:
 - source_image_simple: a friendly catalog key (WindowsServer2022, WindowsServer2022AzureEdition,
-  WindowsServer2025, WindowsServer2025AzureEdition; see the image_catalog_keys output), verified
-  Gen2/Trusted Launch marketplace references. The AzureEdition entries are the hotpatching-capable
-  ones.
+  WindowsServer2025, WindowsServer2025AzureEdition, Windows11Pro25H2, Windows11Enterprise25H2,
+  Windows11Enterprise24H2; see the image_catalog_keys output), verified Gen2/Trusted Launch
+  marketplace references. WindowsServer2025AzureEdition is the hotpatching-capable one. The
+  Windows11 entries are desktop images and set license_type = "Windows_Client" for you (the
+  multi-tenant hosting rights attestation Windows client OS on Azure requires).
 - source_image_reference: { publisher, offer, sku, version (default latest) } for anything else.
 - source_image_id: a custom or gallery image id.
 Marketplace plan images: set plan { name, product, publisher } and optionally
@@ -77,11 +79,13 @@ edge_zone; spot { max_bid_price, eviction_policy }; additional_capabilities (ult
 encryption_at_host_enabled (subscription feature-gated; see resource_provider_feature_registrations
 for the often-forgotten registration); identity (SystemAssigned by default, UserAssigned, both as
 "SystemAssigned, UserAssigned", or None for no identity at all); patching (patch_mode default
-AutomaticByOS, patch_assessment_mode default AutomaticByPlatform, automatic_updates_enabled default
-true, hotpatching_enabled for AzureEdition images with AutomaticByPlatform patching, reboot_setting,
-bypass flag); timezone; license_type (None by default; "Windows_Server" claims Azure Hybrid
-Benefit); user_data / custom_data; computer_name (Windows caps it at 15 characters, so it defaults
-to the VM name upper-cased, separators stripped, truncated to 15);
+AutomaticByOS, patch_assessment_mode default AutomaticByPlatform on Server and ImageDefault on
+Windows client images, which Azure guest patching rejects AutomaticByPlatform for in either
+setting; automatic_updates_enabled default true, hotpatching_enabled for AzureEdition images with
+AutomaticByPlatform patching, reboot_setting, bypass flag); timezone; license_type (unset by default, or Windows_Client from a Windows 11 catalog
+entry; "Windows_Server" claims Azure Hybrid Benefit, "Windows_Client" attests Windows 10/11 hosting
+rights, and an explicit value always wins); user_data / custom_data; computer_name (Windows caps it
+at 15 characters, so it defaults to the VM name upper-cased, separators stripped, truncated to 15);
 disk_controller_type; extensions_time_budget; gallery_applications; secrets (key vault certificates
 with their Windows certificate store); winrm_listeners; additional_unattend_content;
 termination_notification; os_image_notification; boot_diagnostics_storage_account_uri (unset =
@@ -165,7 +169,7 @@ DESC
     automatic_updates_enabled                              = optional(bool, true)
     hotpatching_enabled                                    = optional(bool, false)
     timezone                                               = optional(string)
-    patch_assessment_mode                                  = optional(string, "AutomaticByPlatform")
+    patch_assessment_mode                                  = optional(string)
     bypass_platform_safety_checks_on_user_schedule_enabled = optional(bool, false)
     reboot_setting                                         = optional(string)
     provision_vm_agent                                     = optional(bool, true)
@@ -269,11 +273,14 @@ DESC
   }
 
   validation {
+    condition     = alltrue([for v in values(var.windows_virtual_machines) : v.license_type == null || contains(["None", "Windows_Client", "Windows_Server"], coalesce(v.license_type, "-"))])
+    error_message = "license_type must be None, Windows_Client, or Windows_Server (or unset)."
+  }
+
+  validation {
     condition     = alltrue([for v in values(var.windows_virtual_machines) : contains(["SystemAssigned", "UserAssigned", "SystemAssigned, UserAssigned", "None"], v.identity.type)])
     error_message = "identity.type must be SystemAssigned, UserAssigned, \"SystemAssigned, UserAssigned\", or None."
   }
-
-
 
   validation {
     condition = alltrue(flatten([

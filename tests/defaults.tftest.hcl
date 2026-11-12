@@ -78,6 +78,11 @@ run "secure_defaults_with_catalog" {
     condition     = length(azurerm_windows_virtual_machine.this["vm-ldo-app-uks-tst-001"].boot_diagnostics) == 1
     error_message = "Managed boot diagnostics should be on by default."
   }
+
+  assert {
+    condition     = azurerm_windows_virtual_machine.this["vm-ldo-app-uks-tst-001"].patch_assessment_mode == "AutomaticByPlatform"
+    error_message = "Server images should keep platform patch assessment on by default."
+  }
 }
 
 # An unknown catalog key fails the plan with the key list.
@@ -249,4 +254,156 @@ run "identity_none_and_public_ip_flagged" {
   }
 
   expect_failures = [check.public_ps_are_visible]
+}
+
+# A Windows 11 catalog key resolves to the verified desktop reference, keeps Trusted Launch, and
+# carries license_type = "Windows_Client" (the multi-tenant hosting rights attestation) on its own.
+run "windows11_catalog_carries_client_license" {
+  command = apply
+
+  variables {
+    windows_virtual_machines = {
+      "vm-ldo-dsk-uks-tst-001" = {
+        size                = "Standard_D2lds_v6"
+        admin_username      = "azureadmin"
+        admin_password      = "CorrectHorseBatteryStaple1!"
+        source_image_simple = "Windows11Enterprise25H2"
+        subnet_id           = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-t/providers/Microsoft.Network/virtualNetworks/vnet-t/subnets/snet"
+      }
+    }
+  }
+
+  assert {
+    condition = (
+      azurerm_windows_virtual_machine.this["vm-ldo-dsk-uks-tst-001"].source_image_reference[0].publisher == "MicrosoftWindowsDesktop" &&
+      azurerm_windows_virtual_machine.this["vm-ldo-dsk-uks-tst-001"].source_image_reference[0].offer == "windows-11" &&
+      azurerm_windows_virtual_machine.this["vm-ldo-dsk-uks-tst-001"].source_image_reference[0].sku == "win11-25h2-ent"
+    )
+    error_message = "The Windows 11 catalog key should resolve to the verified desktop reference."
+  }
+
+  assert {
+    condition     = azurerm_windows_virtual_machine.this["vm-ldo-dsk-uks-tst-001"].license_type == "Windows_Client"
+    error_message = "A Windows 11 catalog image should carry license_type = Windows_Client."
+  }
+
+  assert {
+    condition     = azurerm_windows_virtual_machine.this["vm-ldo-dsk-uks-tst-001"].secure_boot_enabled == true && azurerm_windows_virtual_machine.this["vm-ldo-dsk-uks-tst-001"].vtpm_enabled == true
+    error_message = "Trusted Launch should stay on for Windows 11."
+  }
+
+  assert {
+    condition     = azurerm_windows_virtual_machine.this["vm-ldo-dsk-uks-tst-001"].patch_mode == "AutomaticByOS" && azurerm_windows_virtual_machine.this["vm-ldo-dsk-uks-tst-001"].patch_assessment_mode == "ImageDefault"
+    error_message = "Windows 11 should default to AutomaticByOS patching and ImageDefault assessment (Azure guest patching rejects desktop images)."
+  }
+}
+
+# Platform-orchestrated patching on a desktop image fails the plan instead of a 400 at apply.
+run "windows11_rejects_platform_patching" {
+  command = plan
+
+  variables {
+    windows_virtual_machines = {
+      "vm-dsk" = {
+        size                = "Standard_D2lds_v6"
+        admin_username      = "azureadmin"
+        admin_password      = "CorrectHorseBatteryStaple1!"
+        source_image_simple = "Windows11Pro25H2"
+        patch_mode          = "AutomaticByPlatform"
+        subnet_id           = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-t/providers/Microsoft.Network/virtualNetworks/vnet-t/subnets/snet"
+      }
+    }
+  }
+
+  expect_failures = [azurerm_windows_virtual_machine.this]
+}
+
+# So does explicitly asking for platform patch assessment on a desktop image.
+run "windows11_rejects_platform_assessment" {
+  command = plan
+
+  variables {
+    windows_virtual_machines = {
+      "vm-dsk" = {
+        size                  = "Standard_D2lds_v6"
+        admin_username        = "azureadmin"
+        admin_password        = "CorrectHorseBatteryStaple1!"
+        source_image_simple   = "Windows11Enterprise24H2"
+        patch_assessment_mode = "AutomaticByPlatform"
+        subnet_id             = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-t/providers/Microsoft.Network/virtualNetworks/vnet-t/subnets/snet"
+      }
+    }
+  }
+
+  expect_failures = [azurerm_windows_virtual_machine.this]
+}
+
+# An explicit license_type wins over the catalog's, and dropping Windows_Client on a desktop image
+# trips the licensing check.
+run "windows11_license_override_is_flagged" {
+  command = plan
+
+  variables {
+    windows_virtual_machines = {
+      "vm-dsk" = {
+        size                = "Standard_D2lds_v6"
+        admin_username      = "azureadmin"
+        admin_password      = "CorrectHorseBatteryStaple1!"
+        source_image_simple = "Windows11Pro25H2"
+        license_type        = "None"
+        subnet_id           = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-t/providers/Microsoft.Network/virtualNetworks/vnet-t/subnets/snet"
+      }
+    }
+  }
+
+  assert {
+    condition     = azurerm_windows_virtual_machine.this["vm-dsk"].license_type == "None"
+    error_message = "An explicit license_type should win over the catalog's."
+  }
+
+  expect_failures = [check.windows_client_license_type]
+}
+
+# A desktop image chosen by source_image_reference (not the catalog) without Windows_Client is
+# flagged too.
+run "desktop_reference_without_client_license_is_flagged" {
+  command = plan
+
+  variables {
+    windows_virtual_machines = {
+      "vm-dsk" = {
+        size           = "Standard_D2lds_v6"
+        admin_username = "azureadmin"
+        admin_password = "CorrectHorseBatteryStaple1!"
+        source_image_reference = {
+          publisher = "MicrosoftWindowsDesktop"
+          offer     = "windows-11"
+          sku       = "win11-24h2-ent-ltsc"
+        }
+        subnet_id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-t/providers/Microsoft.Network/virtualNetworks/vnet-t/subnets/snet"
+      }
+    }
+  }
+
+  expect_failures = [check.windows_client_license_type]
+}
+
+# An unknown license_type is rejected by variable validation.
+run "rejects_invalid_license_type" {
+  command = plan
+
+  variables {
+    windows_virtual_machines = {
+      "vm-bad" = {
+        size                = "Standard_D2lds_v6"
+        admin_username      = "azureadmin"
+        admin_password      = "CorrectHorseBatteryStaple1!"
+        source_image_simple = "WindowsServer2022"
+        license_type        = "Windows_Desktop"
+        subnet_id           = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-t/providers/Microsoft.Network/virtualNetworks/vnet-t/subnets/snet"
+      }
+    }
+  }
+
+  expect_failures = [var.windows_virtual_machines]
 }

@@ -23,6 +23,16 @@ check "hotpatching_prerequisites" {
   }
 }
 
+# Windows client images (Windows 10/11) are only licensed on Azure with multi-tenant hosting rights,
+# which license_type = "Windows_Client" attests. The Windows 11 catalog entries set it automatically,
+# so this fires on an explicit override, or on a source_image_reference to a desktop image without it.
+check "windows_client_license_type" {
+  assert {
+    condition     = alltrue([for k in local.client_os_vms : local.resolved_license_type[k] == "Windows_Client"])
+    error_message = "These VMs run a Windows client image without license_type = \"Windows_Client\", the multi-tenant hosting rights attestation Windows 10/11 on Azure requires: ${join(", ", [for k in local.client_os_vms : k if local.resolved_license_type[k] != "Windows_Client"])}."
+  }
+}
+
 # Turning Trusted Launch off should be equally visible.
 check "trusted_launch_optouts_are_visible" {
   assert {
