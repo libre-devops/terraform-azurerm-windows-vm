@@ -233,6 +233,11 @@ run "vm_insights" {
     condition     = length(azurerm_virtual_machine_extension.monitor_agent) == 1 && length(azurerm_monitor_data_collection_rule.vm_insights) == 1
     error_message = "The agent should respect the opt-out and the DCR should be created."
   }
+
+  assert {
+    condition     = azurerm_monitor_data_collection_rule.vm_insights[0].name == "dcr-vminsights-windows-${provider::azurerm::parse_resource_id(var.resource_group_id).resource_group_name}"
+    error_message = "The created DCR's name should carry the OS, so windows-vm and linux-vm calls in one resource group do not collide."
+  }
 }
 
 # Identity None omits the block; the public IP posture check still fires (input only).
@@ -406,4 +411,53 @@ run "rejects_invalid_license_type" {
   }
 
   expect_failures = [var.windows_virtual_machines]
+}
+
+# data_collection_rule_name overrides the created DCR's name (two windows calls in one resource group).
+run "vm_insights_dcr_name_override" {
+  command = apply
+
+  variables {
+    vm_insights = {
+      log_analytics_workspace_id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-t/providers/Microsoft.OperationalInsights/workspaces/log-t"
+      data_collection_rule_name  = "dcr-vminsights-windows-app"
+    }
+    windows_virtual_machines = {
+      "vm-mon" = {
+        size                = "Standard_D2lds_v6"
+        admin_username      = "azureadmin"
+        admin_password      = "CorrectHorseBatteryStaple1!"
+        source_image_simple = "WindowsServer2022"
+        subnet_id           = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-t/providers/Microsoft.Network/virtualNetworks/vnet-t/subnets/snet"
+      }
+    }
+  }
+
+  assert {
+    condition     = azurerm_monitor_data_collection_rule.vm_insights[0].name == "dcr-vminsights-windows-app"
+    error_message = "data_collection_rule_name should name the created DCR."
+  }
+}
+
+# A DCR name alongside an existing DCR id does nothing, so it is rejected rather than ignored.
+run "rejects_dcr_name_with_existing_dcr" {
+  command = plan
+
+  variables {
+    vm_insights = {
+      data_collection_rule_id   = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-t/providers/Microsoft.Insights/dataCollectionRules/dcr-existing"
+      data_collection_rule_name = "dcr-unused"
+    }
+    windows_virtual_machines = {
+      "vm-mon" = {
+        size                = "Standard_D2lds_v6"
+        admin_username      = "azureadmin"
+        admin_password      = "CorrectHorseBatteryStaple1!"
+        source_image_simple = "WindowsServer2022"
+        subnet_id           = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-t/providers/Microsoft.Network/virtualNetworks/vnet-t/subnets/snet"
+      }
+    }
+  }
+
+  expect_failures = [var.vm_insights]
 }
